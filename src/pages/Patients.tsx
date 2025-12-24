@@ -29,6 +29,7 @@ export default function Patients() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [genderFilter, setGenderFilter] = useState<Gender | 'all'>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -96,9 +97,13 @@ export default function Patients() {
     setIsSaving(false);
   };
 
-  const filteredPatients = patients.filter(p =>
-    `${p.first_name} ${p.last_name} ${p.mrn}`.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredPatients = patients.filter(p => {
+    const matchesSearch = `${p.first_name} ${p.last_name} ${p.mrn} ${p.email || ''} ${p.phone || ''}`
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    const matchesGender = genderFilter === 'all' || p.gender === genderFilter;
+    return matchesSearch && matchesGender;
+  });
 
   if (authLoading || isLoading) {
     return (
@@ -120,15 +125,28 @@ export default function Patients() {
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-6 gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search patients..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
+        <div className="flex flex-wrap items-center justify-between mb-6 gap-4">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name, MRN, phone, or email..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select value={genderFilter} onValueChange={(v) => setGenderFilter(v as Gender | 'all')}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue placeholder="Gender" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Genders</SelectItem>
+                <SelectItem value="Male">Male</SelectItem>
+                <SelectItem value="Female">Female</SelectItem>
+                <SelectItem value="Other">Other</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
