@@ -1,0 +1,10 @@
+project_id = "jmzmwkfctefzokhesxjf"
+
+[functions.generate-note]
+verify_jwt = true
+
+[functions.transcribe-audio]
+verify_jwt = true
+
+[functions.search-patient-context]
+verify_jwt = true
