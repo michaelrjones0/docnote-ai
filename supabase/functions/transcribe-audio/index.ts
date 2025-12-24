@@ -48,54 +48,51 @@ serve(async (req) => {
       throw new Error('No audio data provided');
     }
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY not configured');
+    const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
+    if (!ELEVENLABS_API_KEY) {
+      throw new Error('ELEVENLABS_API_KEY not configured');
     }
 
-    console.log('Processing audio for transcription...');
+    console.log('Processing audio for transcription with ElevenLabs...');
 
-    // Process audio in chunks
+    // Process audio from base64 to binary
     const binaryAudio = processBase64Chunks(audio);
     
-    // For now, we'll use Lovable AI to simulate transcription
-    // In production, you'd integrate with a proper speech-to-text service
-    // This demonstrates the architecture
-    
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    // Create form data for ElevenLabs API
+    const formData = new FormData();
+    const blob = new Blob([binaryAudio], { type: 'audio/webm' });
+    formData.append('file', blob, 'audio.webm');
+    formData.append('model_id', 'scribe_v1');
+    formData.append('tag_audio_events', 'true');
+    formData.append('diarize', 'true');
+
+    // Call ElevenLabs Speech-to-Text API
+    const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY,
       },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'You are a medical transcription assistant. Convert the audio content description to a realistic medical encounter transcript.' 
-          },
-          { 
-            role: 'user', 
-            content: 'Generate a sample medical encounter transcript for testing purposes. Include doctor and patient dialogue about a common medical concern.' 
-          }
-        ],
-      }),
+      body: formData,
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('Transcription error:', response.status, errorText);
-      throw new Error(`Transcription failed: ${response.status}`);
+      console.error('ElevenLabs API error:', response.status, errorText);
+      throw new Error(`ElevenLabs transcription failed: ${response.status} - ${errorText}`);
     }
 
-    const data = await response.json();
-    const transcript = data.choices?.[0]?.message?.content || '';
-
-    console.log('Transcription completed');
+    const transcriptionResult = await response.json();
+    console.log('ElevenLabs transcription completed successfully');
+    
+    // ElevenLabs returns { text: string, words: [...], audio_events?: [...] }
+    const transcript = transcriptionResult.text || '';
 
     return new Response(
-      JSON.stringify({ text: transcript }),
+      JSON.stringify({ 
+        text: transcript,
+        words: transcriptionResult.words,
+        audio_events: transcriptionResult.audio_events
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
