@@ -4,14 +4,16 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
 import { useTranscription } from '@/hooks/useTranscription';
 import { useNoteGeneration, NoteType } from '@/hooks/useNoteGeneration';
+import { usePreviousVisits } from '@/hooks/usePreviousVisits';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { PreviousVisitsPanel } from '@/components/encounters/PreviousVisitsPanel';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Mic, MicOff, Square, FileText, Loader2, Play, Pause } from 'lucide-react';
+import { ArrowLeft, Mic, Square, FileText, Loader2, Play, Pause, Save } from 'lucide-react';
 
 interface Patient {
   id: string;
@@ -26,6 +28,8 @@ export default function Encounters() {
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [manualText, setManualText] = useState('');
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>('SOAP');
+  const [isSaving, setIsSaving] = useState(false);
+  const [encounterId, setEncounterId] = useState<string | null>(null);
 
   const { user, isLoading: authLoading, isProvider } = useAuth();
   const navigate = useNavigate();
@@ -34,6 +38,16 @@ export default function Encounters() {
   const { isRecording, isPaused, audioBlob, startRecording, stopRecording, pauseRecording, resumeRecording, error: recorderError } = useAudioRecorder();
   const { transcript, isTranscribing, transcribeAudio, addManualTranscript, getFullTranscript, clearTranscript } = useTranscription();
   const { isGenerating, generatedNote, generateNote, setGeneratedNote } = useNoteGeneration();
+  
+  const { 
+    previousVisits, 
+    chronicConditions, 
+    aiContextAnalysis, 
+    isLoadingVisits, 
+    isLoadingContext,
+    fetchSmartContext,
+    searchContextManually 
+  } = usePreviousVisits(selectedPatientId || null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -52,6 +66,16 @@ export default function Encounters() {
       transcribeAudio(audioBlob).catch(console.error);
     }
   }, [audioBlob, isRecording]);
+
+  // Smart auto-context for chronic conditions
+  useEffect(() => {
+    if (chiefComplaint && chronicConditions.some(c => c.is_chronic)) {
+      const timer = setTimeout(() => {
+        fetchSmartContext(chiefComplaint);
+      }, 1000); // Debounce
+      return () => clearTimeout(timer);
+    }
+  }, [chiefComplaint, chronicConditions, fetchSmartContext]);
 
   const fetchPatients = async () => {
     const { data } = await supabase
@@ -76,14 +100,75 @@ export default function Encounters() {
     }
 
     try {
+      // Include previous visit context for chronic conditions
+      const previousVisitData = previousVisits.slice(0, 5).map(v => ({
+        date: v.date,
+        chiefComplaint: v.chiefComplaint,
+        summary: v.summary,
+      }));
+
+      const chronicData = chronicConditions.filter(c => c.is_chronic);
+
       await generateNote({
         noteType: selectedNoteType,
         transcript: fullTranscript || manualText,
         chiefComplaint,
+        previousVisits: previousVisitData,
+        chronicConditions: chronicData,
       });
       toast({ title: 'Note generated successfully' });
     } catch (err) {
       toast({ title: 'Generation failed', description: 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const handleSaveNote = async () => {
+    if (!generatedNote || !selectedPatientId || !user) {
+      toast({ title: 'Cannot save', description: 'Generate a note first.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Create encounter if not exists
+      let currentEncounterId = encounterId;
+      if (!currentEncounterId) {
+        const { data: enc, error: encError } = await supabase
+          .from('encounters')
+          .insert({
+            patient_id: selectedPatientId,
+            provider_id: user.id,
+            chief_complaint: chiefComplaint,
+            status: 'completed',
+          })
+          .select('id')
+          .single();
+
+        if (encError) throw encError;
+        currentEncounterId = enc.id;
+        setEncounterId(enc.id);
+      }
+
+      // Save the note
+      const { error: noteError } = await supabase
+        .from('notes')
+        .insert({
+          encounter_id: currentEncounterId,
+          note_type: selectedNoteType,
+          raw_content: generatedNote,
+          content: { text: generatedNote },
+          created_by: user.id,
+          is_finalized: true,
+        });
+
+      if (noteError) throw noteError;
+
+      toast({ title: 'Note saved successfully' });
+    } catch (err) {
+      console.error('Save error:', err);
+      toast({ title: 'Save failed', description: 'Please try again.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -111,13 +196,18 @@ export default function Encounters() {
               Recording
             </Badge>
           )}
+          {selectedPatient && (
+            <Badge variant="outline">
+              {selectedPatient.last_name}, {selectedPatient.first_name}
+            </Badge>
+          )}
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        <div className="grid lg:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-3 gap-6">
           {/* Left Panel - Recording & Transcript */}
-          <div className="space-y-6">
+          <div className="lg:col-span-2 space-y-6">
             <Card>
               <CardHeader>
                 <CardTitle>Patient & Chief Complaint</CardTitle>
@@ -180,7 +270,7 @@ export default function Encounters() {
                 <CardTitle>Transcript</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="min-h-[200px] max-h-[400px] overflow-y-auto border rounded-md p-4 bg-muted/30">
+                <div className="min-h-[200px] max-h-[300px] overflow-y-auto border rounded-md p-4 bg-muted/30">
                   {transcript.length === 0 ? (
                     <p className="text-muted-foreground text-sm">Transcript will appear here...</p>
                   ) : (
@@ -203,37 +293,41 @@ export default function Encounters() {
                 </div>
               </CardContent>
             </Card>
-          </div>
 
-          {/* Right Panel - Note Generation */}
-          <div className="space-y-6">
+            {/* Note Generation */}
             <Card>
               <CardHeader>
                 <CardTitle>Generate Note</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Select value={selectedNoteType} onValueChange={(v) => setSelectedNoteType(v as NoteType)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="SOAP">SOAP Note</SelectItem>
-                    <SelectItem value="H&P">History & Physical</SelectItem>
-                    <SelectItem value="Progress">Progress Note</SelectItem>
-                    <SelectItem value="Procedure">Procedure Note</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button onClick={handleGenerateNote} disabled={isGenerating} className="w-full gap-2">
-                  {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                  Generate {selectedNoteType} Note
-                </Button>
+                <div className="flex gap-2">
+                  <Select value={selectedNoteType} onValueChange={(v) => setSelectedNoteType(v as NoteType)}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SOAP">SOAP Note</SelectItem>
+                      <SelectItem value="H&P">History & Physical</SelectItem>
+                      <SelectItem value="Progress">Progress Note</SelectItem>
+                      <SelectItem value="Procedure">Procedure Note</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={handleGenerateNote} disabled={isGenerating} className="gap-2">
+                    {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                    Generate
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
             {generatedNote && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle>Generated Note</CardTitle>
+                  <Button onClick={handleSaveNote} disabled={isSaving} size="sm" className="gap-2">
+                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save Note
+                  </Button>
                 </CardHeader>
                 <CardContent>
                   <Textarea
@@ -245,6 +339,19 @@ export default function Encounters() {
                 </CardContent>
               </Card>
             )}
+          </div>
+
+          {/* Right Panel - Previous Visits & Context */}
+          <div className="space-y-4">
+            <PreviousVisitsPanel
+              previousVisits={previousVisits}
+              chronicConditions={chronicConditions}
+              aiContextAnalysis={aiContextAnalysis}
+              isLoadingVisits={isLoadingVisits}
+              isLoadingContext={isLoadingContext}
+              onSearchContext={() => searchContextManually(chiefComplaint)}
+              chiefComplaint={chiefComplaint}
+            />
           </div>
         </div>
       </main>
