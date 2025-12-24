@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { PatientEditForm } from '@/components/patients/PatientEditForm';
 import { 
   ArrowLeft, 
   Loader2, 
@@ -18,7 +19,8 @@ import {
   AlertCircle,
   Activity,
   FileText,
-  Clock
+  Clock,
+  Pencil
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -61,6 +63,7 @@ export default function PatientDetail() {
   const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   
   const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -179,11 +182,15 @@ export default function PatientDetail() {
       <main className="container mx-auto px-4 py-6 space-y-6">
         {/* Demographics Section */}
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
               Demographics
             </CardTitle>
+            <Button variant="outline" size="sm" onClick={() => setIsEditOpen(true)}>
+              <Pencil className="h-4 w-4 mr-2" />
+              Edit
+            </Button>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -389,6 +396,14 @@ export default function PatientDetail() {
           </Button>
         </div>
       </main>
+
+      {/* Edit Form Dialog */}
+      <PatientEditForm
+        patient={patient}
+        open={isEditOpen}
+        onOpenChange={setIsEditOpen}
+        onSuccess={fetchPatientData}
+      />
     </div>
   );
 }
