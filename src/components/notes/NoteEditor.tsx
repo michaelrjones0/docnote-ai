@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useVoiceNoteEditor } from '@/hooks/useVoiceNoteEditor';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
@@ -21,7 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Loader2, Save, CheckCircle, Lock } from 'lucide-react';
+import { Loader2, Save, CheckCircle, Lock, Mic, Square, Wand2, Type } from 'lucide-react';
 
 interface NoteEditorProps {
   noteId: string | null;
@@ -56,6 +58,17 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
   const [isSaving, setIsSaving] = useState(false);
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
   const { toast } = useToast();
+
+  const {
+    isRecording,
+    isProcessing,
+    voiceMode,
+    setVoiceMode,
+    startRecording,
+    stopRecording,
+    transcribeAudio,
+    applyVoiceInstruction,
+  } = useVoiceNoteEditor();
 
   useEffect(() => {
     if (noteId && open) {
@@ -137,6 +150,34 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
     }
   };
 
+  const handleVoiceAction = async () => {
+    if (isRecording) {
+      const audioBlob = await stopRecording();
+      if (!audioBlob) return;
+
+      const transcribedText = await transcribeAudio(audioBlob);
+      if (!transcribedText) return;
+
+      if (voiceMode === 'dictate') {
+        // Append transcribed text to the note
+        const cursorPosition = content.length;
+        const newContent = content 
+          ? `${content}\n\n${transcribedText}` 
+          : transcribedText;
+        setContent(newContent);
+        toast({ title: 'Text added to note' });
+      } else {
+        // Use the transcribed text as an instruction to edit the note
+        const editedNote = await applyVoiceInstruction(content, transcribedText);
+        if (editedNote) {
+          setContent(editedNote);
+        }
+      }
+    } else {
+      await startRecording();
+    }
+  };
+
   const handleClose = () => {
     setNote(null);
     setContent('');
@@ -185,12 +226,65 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
                 <p><strong>Date:</strong> {new Date(note.encounters?.encounter_date || note.created_at).toLocaleDateString()}</p>
               </div>
 
+              {/* Voice Controls */}
+              {!note.is_finalized && (
+                <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg mb-2">
+                  <Tabs value={voiceMode} onValueChange={(v) => setVoiceMode(v as 'dictate' | 'instruct')} className="flex-1">
+                    <TabsList className="grid w-full max-w-xs grid-cols-2">
+                      <TabsTrigger value="dictate" className="gap-2">
+                        <Type className="h-4 w-4" />
+                        Dictate
+                      </TabsTrigger>
+                      <TabsTrigger value="instruct" className="gap-2">
+                        <Wand2 className="h-4 w-4" />
+                        Instruct
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  
+                  <Button
+                    variant={isRecording ? "destructive" : "default"}
+                    size="sm"
+                    onClick={handleVoiceAction}
+                    disabled={isProcessing}
+                    className="gap-2 min-w-[140px]"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Processing...
+                      </>
+                    ) : isRecording ? (
+                      <>
+                        <Square className="h-4 w-4" />
+                        Stop
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="h-4 w-4" />
+                        {voiceMode === 'dictate' ? 'Dictate' : 'Give Instruction'}
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {/* Mode Description */}
+              {!note.is_finalized && (
+                <p className="text-xs text-muted-foreground mb-2">
+                  {voiceMode === 'dictate' 
+                    ? 'Dictate mode: Your speech will be transcribed and added to the note.' 
+                    : 'Instruct mode: Give commands like "make this more concise" or "convert to bullet points".'
+                  }
+                </p>
+              )}
+
               <div className="flex-1 overflow-hidden">
                 <Textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   disabled={note.is_finalized}
-                  className="h-[50vh] font-mono text-sm resize-none"
+                  className="h-[45vh] font-mono text-sm resize-none"
                   placeholder="Note content..."
                 />
               </div>
