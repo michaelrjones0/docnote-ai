@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.search-patient-context]
 verify_jwt = true
+
+[functions.edit-note-voice]
+verify_jwt = true
