@@ -1,13 +1,13 @@
 project_id = "jmzmwkfctefzokhesxjf"
 
 [functions.generate-note]
-verify_jwt = true
+verify_jwt = false
 
 [functions.transcribe-audio]
-verify_jwt = true
+verify_jwt = false
 
 [functions.search-patient-context]
-verify_jwt = true
+verify_jwt = false
 
 [functions.edit-note-voice]
-verify_jwt = true
+verify_jwt = false
