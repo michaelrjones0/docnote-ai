@@ -23,7 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Loader2, Save, CheckCircle, Lock, Mic, Square, Wand2, Type } from 'lucide-react';
+import { Loader2, Save, CheckCircle, Lock, Mic, Square, Wand2, Type, Undo2 } from 'lucide-react';
 
 interface NoteEditorProps {
   noteId: string | null;
@@ -54,6 +54,7 @@ interface NoteData {
 export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditorProps) {
   const [note, setNote] = useState<NoteData | null>(null);
   const [content, setContent] = useState('');
+  const [previousContent, setPreviousContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false);
@@ -160,7 +161,6 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
 
       if (voiceMode === 'dictate') {
         // Append transcribed text to the note
-        const cursorPosition = content.length;
         const newContent = content 
           ? `${content}\n\n${transcribedText}` 
           : transcribedText;
@@ -170,7 +170,12 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
         // Use the transcribed text as an instruction to edit the note
         const editedNote = await applyVoiceInstruction(content, transcribedText);
         if (editedNote) {
+          setPreviousContent(content);
           setContent(editedNote);
+          toast({ 
+            title: 'Instruction applied',
+            description: 'Click Undo to revert if needed.'
+          });
         }
       }
     } else {
@@ -178,9 +183,18 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
     }
   };
 
+  const handleUndo = () => {
+    if (previousContent !== null) {
+      setContent(previousContent);
+      setPreviousContent(null);
+      toast({ title: 'Edit reverted' });
+    }
+  };
+
   const handleClose = () => {
     setNote(null);
     setContent('');
+    setPreviousContent(null);
     onOpenChange(false);
   };
 
@@ -266,6 +280,18 @@ export function NoteEditor({ noteId, open, onOpenChange, onSuccess }: NoteEditor
                       </>
                     )}
                   </Button>
+
+                  {previousContent !== null && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleUndo}
+                      className="gap-2"
+                    >
+                      <Undo2 className="h-4 w-4" />
+                      Undo
+                    </Button>
+                  )}
                 </div>
               )}
 
