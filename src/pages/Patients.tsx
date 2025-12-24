@@ -224,7 +224,11 @@ export default function Patients() {
             </TableHeader>
             <TableBody>
               {filteredPatients.map((patient) => (
-                <TableRow key={patient.id} className="cursor-pointer hover:bg-muted/50">
+                <TableRow 
+                  key={patient.id} 
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate(`/patients/${patient.id}`)}
+                >
                   <TableCell className="font-mono text-sm">{patient.mrn}</TableCell>
                   <TableCell className="font-medium">{patient.last_name}, {patient.first_name}</TableCell>
                   <TableCell>{new Date(patient.date_of_birth).toLocaleDateString()}</TableCell>
