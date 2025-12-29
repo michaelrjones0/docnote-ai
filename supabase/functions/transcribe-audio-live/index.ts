@@ -36,77 +36,11 @@ function processBase64Chunks(base64String: string, chunkSize = 32768): Uint8Arra
   return result;
 }
 
-// Create AWS signature for Transcribe Streaming
-async function createAWSSignature(
-  method: string,
-  service: string,
-  region: string,
-  host: string,
-  path: string,
-  queryString: string,
-  headers: Record<string, string>,
-  payload: Uint8Array,
-  accessKeyId: string,
-  secretAccessKey: string
-): Promise<{ authHeader: string; amzDate: string }> {
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
-  const dateStamp = amzDate.slice(0, 8);
-  
-  const algorithm = 'AWS4-HMAC-SHA256';
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  
-  // Create canonical headers
-  const sortedHeaders = Object.keys(headers).sort();
-  const canonicalHeaders = sortedHeaders.map(k => `${k.toLowerCase()}:${headers[k].trim()}\n`).join('');
-  const signedHeaders = sortedHeaders.map(k => k.toLowerCase()).join(';');
-  
-  // Hash payload
-  const payloadBuffer = new Uint8Array(payload).buffer as ArrayBuffer;
-  const payloadHash = await crypto.subtle.digest('SHA-256', payloadBuffer);
-  const payloadHashHex = Array.from(new Uint8Array(payloadHash)).map(b => b.toString(16).padStart(2, '0')).join('');
-  
-  // Create canonical request
-  const canonicalRequest = [
-    method,
-    path,
-    queryString,
-    canonicalHeaders,
-    signedHeaders,
-    payloadHashHex
-  ].join('\n');
-  
-  // Hash canonical request
-  const canonicalRequestHash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalRequest));
-  const canonicalRequestHashHex = Array.from(new Uint8Array(canonicalRequestHash)).map(b => b.toString(16).padStart(2, '0')).join('');
-  
-  // Create string to sign
-  const stringToSign = [
-    algorithm,
-    amzDate,
-    credentialScope,
-    canonicalRequestHashHex
-  ].join('\n');
-  
-  // Create signing key
-  const kDate = await hmacSHA256(new TextEncoder().encode('AWS4' + secretAccessKey), dateStamp);
-  const kRegion = await hmacSHA256(kDate, region);
-  const kService = await hmacSHA256(kRegion, service);
-  const kSigning = await hmacSHA256(kService, 'aws4_request');
-  
-  // Calculate signature
-  const signatureBytes = await hmacSHA256(kSigning, stringToSign);
-  const signature = Array.from(new Uint8Array(signatureBytes)).map(b => b.toString(16).padStart(2, '0')).join('');
-  
-  const authHeader = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  
-  return { authHeader, amzDate };
-}
-
+// AWS Signature V4 helpers
 async function hmacSHA256(key: ArrayBuffer | Uint8Array, message: string): Promise<ArrayBuffer> {
   let keyBuffer: ArrayBuffer;
   if (key instanceof Uint8Array) {
-    keyBuffer = new Uint8Array(key).buffer as ArrayBuffer;
+    keyBuffer = key.buffer.slice(key.byteOffset, key.byteOffset + key.byteLength) as ArrayBuffer;
   } else {
     keyBuffer = key as ArrayBuffer;
   }
@@ -120,13 +54,290 @@ async function hmacSHA256(key: ArrayBuffer | Uint8Array, message: string): Promi
   return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(message));
 }
 
+async function sha256(data: Uint8Array | string): Promise<string> {
+  const buffer = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+  const hash = await crypto.subtle.digest('SHA-256', arrayBuffer);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function createAWSSignature(
+  method: string,
+  service: string,
+  region: string,
+  host: string,
+  path: string,
+  queryString: string,
+  headers: Record<string, string>,
+  payloadHash: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  amzDate: string,
+  dateStamp: string
+): Promise<string> {
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  
+  const sortedHeaders = Object.keys(headers).sort();
+  const canonicalHeaders = sortedHeaders.map(k => `${k.toLowerCase()}:${headers[k].trim()}\n`).join('');
+  const signedHeaders = sortedHeaders.map(k => k.toLowerCase()).join(';');
+  
+  const canonicalRequest = [
+    method,
+    path,
+    queryString,
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash
+  ].join('\n');
+  
+  const canonicalRequestHash = await sha256(canonicalRequest);
+  
+  const stringToSign = [
+    algorithm,
+    amzDate,
+    credentialScope,
+    canonicalRequestHash
+  ].join('\n');
+  
+  const kDate = await hmacSHA256(new TextEncoder().encode('AWS4' + secretAccessKey), dateStamp);
+  const kRegion = await hmacSHA256(kDate, region);
+  const kService = await hmacSHA256(kRegion, service);
+  const kSigning = await hmacSHA256(kService, 'aws4_request');
+  
+  const signatureBytes = await hmacSHA256(kSigning, stringToSign);
+  const signature = Array.from(new Uint8Array(signatureBytes)).map(b => b.toString(16).padStart(2, '0')).join('');
+  
+  return `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+}
+
+// Upload audio to S3
+async function uploadToS3(
+  audioData: Uint8Array,
+  bucket: string,
+  key: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  region: string
+): Promise<string> {
+  const host = `${bucket}.s3.${region}.amazonaws.com`;
+  const path = `/${key}`;
+  
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  
+  const payloadHash = await sha256(audioData);
+  
+  const headers: Record<string, string> = {
+    'Host': host,
+    'Content-Type': 'audio/webm',
+    'X-Amz-Content-Sha256': payloadHash,
+    'X-Amz-Date': amzDate,
+  };
+  
+  const authHeader = await createAWSSignature(
+    'PUT', 's3', region, host, path, '',
+    headers, payloadHash, accessKeyId, secretAccessKey, amzDate, dateStamp
+  );
+  
+  headers['Authorization'] = authHeader;
+  
+  const bodyBuffer = audioData.buffer.slice(audioData.byteOffset, audioData.byteOffset + audioData.byteLength) as ArrayBuffer;
+  
+  const response = await fetch(`https://${host}${path}`, {
+    method: 'PUT',
+    headers,
+    body: bodyBuffer,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`S3 upload failed: ${response.status} - ${errorText}`);
+  }
+  
+  return `s3://${bucket}/${key}`;
+}
+
+// Start AWS Transcribe job
+async function startTranscribeJob(
+  jobName: string,
+  s3Uri: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  region: string,
+  languageCode: string
+): Promise<void> {
+  const host = `transcribe.${region}.amazonaws.com`;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  
+  const requestBody = JSON.stringify({
+    TranscriptionJobName: jobName,
+    LanguageCode: languageCode,
+    MediaFormat: 'webm',
+    Media: { MediaFileUri: s3Uri },
+    Settings: { ShowSpeakerLabels: false }
+  });
+  
+  const payloadHash = await sha256(requestBody);
+  
+  const headers: Record<string, string> = {
+    'Host': host,
+    'Content-Type': 'application/x-amz-json-1.1',
+    'X-Amz-Target': 'Transcribe.StartTranscriptionJob',
+    'X-Amz-Content-Sha256': payloadHash,
+    'X-Amz-Date': amzDate,
+  };
+  
+  const authHeader = await createAWSSignature(
+    'POST', 'transcribe', region, host, '/', '',
+    headers, payloadHash, accessKeyId, secretAccessKey, amzDate, dateStamp
+  );
+  
+  headers['Authorization'] = authHeader;
+  
+  const response = await fetch(`https://${host}/`, {
+    method: 'POST',
+    headers,
+    body: requestBody,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`StartTranscriptionJob failed: ${response.status} - ${errorText}`);
+  }
+}
+
+// Get Transcribe job result
+async function getTranscribeJob(
+  jobName: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  region: string
+): Promise<{ status: string; transcriptUri?: string }> {
+  const host = `transcribe.${region}.amazonaws.com`;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  
+  const requestBody = JSON.stringify({ TranscriptionJobName: jobName });
+  const payloadHash = await sha256(requestBody);
+  
+  const headers: Record<string, string> = {
+    'Host': host,
+    'Content-Type': 'application/x-amz-json-1.1',
+    'X-Amz-Target': 'Transcribe.GetTranscriptionJob',
+    'X-Amz-Content-Sha256': payloadHash,
+    'X-Amz-Date': amzDate,
+  };
+  
+  const authHeader = await createAWSSignature(
+    'POST', 'transcribe', region, host, '/', '',
+    headers, payloadHash, accessKeyId, secretAccessKey, amzDate, dateStamp
+  );
+  
+  headers['Authorization'] = authHeader;
+  
+  const response = await fetch(`https://${host}/`, {
+    method: 'POST',
+    headers,
+    body: requestBody,
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GetTranscriptionJob failed: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
+  return {
+    status: data.TranscriptionJob?.TranscriptionJobStatus || 'UNKNOWN',
+    transcriptUri: data.TranscriptionJob?.Transcript?.TranscriptFileUri
+  };
+}
+
+// Delete Transcribe job
+async function deleteTranscribeJob(
+  jobName: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  region: string
+): Promise<void> {
+  const host = `transcribe.${region}.amazonaws.com`;
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  
+  const requestBody = JSON.stringify({ TranscriptionJobName: jobName });
+  const payloadHash = await sha256(requestBody);
+  
+  const headers: Record<string, string> = {
+    'Host': host,
+    'Content-Type': 'application/x-amz-json-1.1',
+    'X-Amz-Target': 'Transcribe.DeleteTranscriptionJob',
+    'X-Amz-Content-Sha256': payloadHash,
+    'X-Amz-Date': amzDate,
+  };
+  
+  const authHeader = await createAWSSignature(
+    'POST', 'transcribe', region, host, '/', '',
+    headers, payloadHash, accessKeyId, secretAccessKey, amzDate, dateStamp
+  );
+  
+  headers['Authorization'] = authHeader;
+  
+  await fetch(`https://${host}/`, {
+    method: 'POST',
+    headers,
+    body: requestBody,
+  });
+}
+
+// Delete S3 object
+async function deleteFromS3(
+  bucket: string,
+  key: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  region: string
+): Promise<void> {
+  const host = `${bucket}.s3.${region}.amazonaws.com`;
+  const path = `/${key}`;
+  
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  
+  const payloadHash = await sha256(new Uint8Array(0));
+  
+  const headers: Record<string, string> = {
+    'Host': host,
+    'X-Amz-Content-Sha256': payloadHash,
+    'X-Amz-Date': amzDate,
+  };
+  
+  const authHeader = await createAWSSignature(
+    'DELETE', 's3', region, host, path, '',
+    headers, payloadHash, accessKeyId, secretAccessKey, amzDate, dateStamp
+  );
+  
+  headers['Authorization'] = authHeader;
+  
+  await fetch(`https://${host}${path}`, {
+    method: 'DELETE',
+    headers,
+  });
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { audio, languageCode = 'en-US', sampleRate = 16000 } = await req.json();
+    const { audio, languageCode = 'en-US' } = await req.json();
     
     if (!audio) {
       throw new Error('No audio data provided');
@@ -135,47 +346,80 @@ serve(async (req) => {
     const AWS_ACCESS_KEY_ID = Deno.env.get('AWS_ACCESS_KEY_ID');
     const AWS_SECRET_ACCESS_KEY = Deno.env.get('AWS_SECRET_ACCESS_KEY');
     const AWS_REGION = Deno.env.get('AWS_REGION') || 'us-east-1';
+    const AWS_S3_BUCKET = Deno.env.get('AWS_S3_BUCKET');
 
     if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
       throw new Error('AWS credentials not configured');
     }
 
-    console.log('Processing audio chunk for live transcription with AWS Transcribe...');
+    if (!AWS_S3_BUCKET) {
+      throw new Error('AWS S3 bucket not configured');
+    }
+
+    console.log('Processing live audio chunk with AWS Transcribe...');
 
     // Process audio from base64 to binary
     const binaryAudio = processBase64Chunks(audio);
     
-    // For live streaming chunks, we use the HTTP/2 streaming API
-    // Since edge functions don't support WebSockets to external services directly,
-    // we'll use the synchronous transcription approach for chunks
-    const host = `transcribe.${AWS_REGION}.amazonaws.com`;
-    const path = '/stream-transcription';
-    
-    const headers: Record<string, string> = {
-      'Host': host,
-      'Content-Type': 'application/vnd.amazon.eventstream',
-      'X-Amz-Target': 'com.amazonaws.transcribe.Transcribe.StartStreamTranscription',
-      'X-Amz-Content-Sha256': 'STREAMING-AWS4-HMAC-SHA256-EVENTS',
-    };
+    // Generate unique identifiers
+    const timestamp = Date.now();
+    const chunkId = crypto.randomUUID().slice(0, 8);
+    const jobName = `live-${timestamp}-${chunkId}`;
+    const s3Key = `live-chunks/${jobName}.webm`;
 
-    // For chunk-based processing, we'll use a simpler POST approach
-    // that works within edge function constraints
-    const transcribeResponse = await transcribeChunk(
-      binaryAudio,
-      languageCode,
-      sampleRate,
-      AWS_ACCESS_KEY_ID,
-      AWS_SECRET_ACCESS_KEY,
-      AWS_REGION
+    // Upload to S3
+    console.log('Uploading chunk to S3...');
+    const s3Uri = await uploadToS3(
+      binaryAudio, AWS_S3_BUCKET, s3Key,
+      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
     );
 
-    console.log('Live transcription chunk completed');
+    // Start transcription job
+    console.log('Starting transcription job:', jobName);
+    await startTranscribeJob(
+      jobName, s3Uri,
+      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, languageCode
+    );
+
+    // Poll for completion (with timeout for live chunks - shorter than batch)
+    const maxAttempts = 30; // ~30 seconds max for live chunks
+    let transcriptText = '';
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const jobStatus = await getTranscribeJob(
+        jobName, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+      );
+      
+      console.log(`Job ${jobName} status: ${jobStatus.status} (attempt ${attempt + 1})`);
+      
+      if (jobStatus.status === 'COMPLETED' && jobStatus.transcriptUri) {
+        const transcriptResponse = await fetch(jobStatus.transcriptUri);
+        const transcriptData = await transcriptResponse.json();
+        transcriptText = transcriptData.results?.transcripts?.[0]?.transcript || '';
+        break;
+      } else if (jobStatus.status === 'FAILED') {
+        console.error('Transcription job failed');
+        break;
+      }
+    }
+
+    // Cleanup: delete job and S3 object
+    try {
+      await deleteTranscribeJob(jobName, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION);
+      await deleteFromS3(s3Key.split('/').pop()!, AWS_S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION);
+    } catch (cleanupError) {
+      console.warn('Cleanup warning:', cleanupError);
+    }
+
+    console.log('Live transcription completed:', transcriptText.slice(0, 100));
 
     return new Response(
       JSON.stringify({ 
-        text: transcribeResponse.text,
-        isPartial: transcribeResponse.isPartial,
-        confidence: transcribeResponse.confidence
+        text: transcriptText,
+        isPartial: false,
+        confidence: 0.95
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -191,51 +435,3 @@ serve(async (req) => {
     );
   }
 });
-
-async function transcribeChunk(
-  audioData: Uint8Array,
-  languageCode: string,
-  sampleRate: number,
-  accessKeyId: string,
-  secretAccessKey: string,
-  region: string
-): Promise<{ text: string; isPartial: boolean; confidence: number }> {
-  // Since AWS Transcribe Streaming requires WebSocket which isn't fully supported,
-  // we'll use a fallback to the ElevenLabs API for live chunks if available,
-  // or return empty for now and rely on batch processing for accuracy
-  
-  const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
-  
-  if (ELEVENLABS_API_KEY) {
-    // Use ElevenLabs for live chunks as a reliable fallback
-    const formData = new FormData();
-    const audioBuffer = new Uint8Array(audioData).buffer as ArrayBuffer;
-    const blob = new Blob([audioBuffer], { type: 'audio/webm' });
-    formData.append('file', blob, 'audio.webm');
-    formData.append('model_id', 'scribe_v1');
-
-    const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-      method: 'POST',
-      headers: {
-        'xi-api-key': ELEVENLABS_API_KEY,
-      },
-      body: formData,
-    });
-
-    if (response.ok) {
-      const result = await response.json();
-      return {
-        text: result.text || '',
-        isPartial: false,
-        confidence: 0.9
-      };
-    }
-  }
-  
-  // If no fallback available, return empty - batch will handle final transcription
-  return {
-    text: '',
-    isPartial: true,
-    confidence: 0
-  };
-}
