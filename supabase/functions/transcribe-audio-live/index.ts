@@ -1,10 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 
 // Supported formats for AWS Transcribe Medical
 const SUPPORTED_FORMATS = ['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm'];
@@ -24,6 +20,26 @@ function getMediaFormat(mimeType: string): string | null {
     'audio/amr': 'amr',
   };
   return mimeToFormat[mimeType.toLowerCase()] || null;
+}
+
+function getCorsHeaders(origin: string | null): Record<string, string> {
+  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim()).filter(Boolean);
+  
+  // Default to localhost for development if no origins configured
+  if (allowedOrigins.length === 0) {
+    allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
+  }
+  
+  const isAllowed = origin && allowedOrigins.some(allowed => 
+    allowed === '*' || origin === allowed || origin.endsWith(allowed.replace('*', ''))
+  );
+  
+  return {
+    'Access-Control-Allow-Origin': isAllowed && origin ? origin : allowedOrigins[0],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  };
 }
 
 // Process base64 in chunks to prevent memory issues
@@ -160,10 +176,14 @@ async function uploadToS3(
 ): Promise<void> {
   const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
   
+  // Include server-side encryption header
   const headers = await signRequest(
     'PUT',
     url,
-    { 'Content-Type': contentType },
+    { 
+      'Content-Type': contentType,
+      'x-amz-server-side-encryption': 'AES256'
+    },
     data,
     's3',
     region,
@@ -189,6 +209,7 @@ async function startMedicalTranscriptionJob(
   jobName: string,
   s3Uri: string,
   outputBucket: string,
+  outputPrefix: string,
   mediaFormat: string,
   accessKeyId: string,
   secretAccessKey: string,
@@ -205,7 +226,7 @@ async function startMedicalTranscriptionJob(
       MediaFileUri: s3Uri
     },
     OutputBucketName: outputBucket,
-    OutputKey: `transcribe/live-output/${jobName}.json`,
+    OutputKey: `${outputPrefix}live-output/${jobName}.json`,
     Specialty: 'PRIMARYCARE',
     Type: 'CONVERSATION',
     Settings: {
@@ -333,7 +354,6 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
   const transcriptText = results?.transcripts?.[0]?.transcript || '';
   const segments: TranscriptSegment[] = [];
 
-  // Parse speaker labels if available
   const speakerLabels = results?.speaker_labels;
   const items = results?.items || [];
 
@@ -343,12 +363,10 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
       const startMs = Math.round(parseFloat(segment.start_time || '0') * 1000);
       const endMs = Math.round(parseFloat(segment.end_time || '0') * 1000);
       
-      // Collect words for this segment
       const segmentItems = segment.items || [];
       const words: string[] = [];
       
       for (const item of segmentItems) {
-        // Find matching content item
         const contentItem = items.find((ci: any) => 
           ci.start_time === item.start_time && ci.end_time === item.end_time
         );
@@ -367,7 +385,6 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
       }
     }
   } else if (items.length > 0) {
-    // Fallback: group items without speaker labels
     let currentSegment: { words: string[]; startMs: number; endMs: number } | null = null;
     
     for (const item of items) {
@@ -379,7 +396,6 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
         if (!currentSegment) {
           currentSegment = { words: [word], startMs, endMs };
         } else if (startMs - currentSegment.endMs > 2000) {
-          // Gap > 2 seconds, start new segment
           segments.push({
             content: currentSegment.words.join(' '),
             speaker: 'spk_0',
@@ -412,9 +428,51 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
   return { text: transcriptText, segments };
 }
 
+async function verifyJWT(req: Request): Promise<{ userId: string } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.replace('Bearer ', '');
+  
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('Supabase env vars not configured');
+    return null;
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false }
+  });
+
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  
+  if (error || !user) {
+    console.error('JWT verification failed:', error?.message);
+    return null;
+  }
+
+  return { userId: user.id };
+}
+
 serve(async (req) => {
+  const origin = req.headers.get('Origin');
+  const corsHeaders = getCorsHeaders(origin);
+
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  // Verify JWT
+  const authResult = await verifyJWT(req);
+  if (!authResult) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized: valid JWT required' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -433,51 +491,47 @@ serve(async (req) => {
           receivedFormat: mimeType,
           supportedFormats: SUPPORTED_FORMATS
         }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     const AWS_ACCESS_KEY_ID = Deno.env.get('AWS_ACCESS_KEY_ID');
     const AWS_SECRET_ACCESS_KEY = Deno.env.get('AWS_SECRET_ACCESS_KEY');
     const AWS_REGION = Deno.env.get('AWS_REGION') || 'us-west-2';
+    const S3_BUCKET = Deno.env.get('AWS_S3_BUCKET');
+    const S3_PREFIX = Deno.env.get('AWS_S3_PREFIX') || 'transcribe/';
 
     if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
       throw new Error('AWS credentials not configured');
     }
 
-    const S3_BUCKET = 'apollohealth-transcription-us-west-2';
+    if (!S3_BUCKET) {
+      throw new Error('AWS_S3_BUCKET environment variable is required');
+    }
 
-    console.log(`Processing live audio chunk ${chunkIndex ?? 'N/A'} (${mimeType}) with AWS Transcribe Medical...`);
+    console.log(`[${authResult.userId}] Processing live audio chunk ${chunkIndex ?? 'N/A'} (${mimeType}) with AWS Transcribe Medical...`);
 
-    // Process audio from base64 to binary
     const binaryAudio = processBase64Chunks(audio);
     
-    // Generate unique identifiers
     const timestamp = Date.now();
     const chunkId = crypto.randomUUID().slice(0, 8);
     const jobName = `medical-live-${timestamp}-${chunkId}`;
-    const fileExtension = mediaFormat === 'mp3' ? 'mp3' : mediaFormat;
-    const s3Key = `transcribe/live/${jobName}.${fileExtension}`;
+    const fileExtension = mediaFormat;
+    const s3Key = `${S3_PREFIX}live/${jobName}.${fileExtension}`;
 
-    // Upload to S3 with correct content type
-    console.log('Uploading chunk to S3...');
+    console.log('Uploading chunk to S3 with encryption...');
     await uploadToS3(
       binaryAudio, S3_BUCKET, s3Key, mimeType,
       AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
     );
 
-    // Start medical transcription job
     console.log('Starting medical transcription job:', jobName);
     await startMedicalTranscriptionJob(
-      jobName, `s3://${S3_BUCKET}/${s3Key}`, S3_BUCKET, mediaFormat,
+      jobName, `s3://${S3_BUCKET}/${s3Key}`, S3_BUCKET, S3_PREFIX, mediaFormat,
       AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, languageCode
     );
 
-    // Poll for completion (shorter timeout for live chunks)
-    const maxAttempts = 60; // ~60 seconds max for live chunks
+    const maxAttempts = 60;
     let transcriptText = '';
     let segments: TranscriptSegment[] = [];
     
@@ -503,7 +557,6 @@ serve(async (req) => {
       }
     }
 
-    // Cleanup: delete job
     try {
       await deleteMedicalTranscriptionJob(jobName, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION);
     } catch (cleanupError) {
@@ -526,10 +579,7 @@ serve(async (req) => {
     console.error('Error in transcribe-audio-live:', error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
