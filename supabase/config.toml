@@ -1,5 +1,23 @@
 project_id = "jmzmwkfctefzokhesxjf"
 
+[functions.transcribe-audio]
+verify_jwt = false
+
+[functions.transcribe-audio-live]
+verify_jwt = false
+
+[functions.transcribe-audio-batch]
+verify_jwt = false
+
+[functions.generate-note]
+verify_jwt = false
+
+[functions.search-patient-context]
+verify_jwt = false
+
+[functions.edit-note-voice]
+verify_jwt = false
+
 [functions.generate-note]
 verify_jwt = false
 
