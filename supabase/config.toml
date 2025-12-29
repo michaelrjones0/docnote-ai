@@ -6,6 +6,9 @@ verify_jwt = false
 [functions.transcribe-audio-batch]
 verify_jwt = false
 
+[functions.transcribe-audio-batch-status]
+verify_jwt = false
+
 [functions.generate-note]
 verify_jwt = false
 
