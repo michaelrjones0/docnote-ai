@@ -67,7 +67,7 @@ export function useVoiceNoteEditor() {
       reader.readAsDataURL(audioBlob);
       const base64Audio = await base64Promise;
 
-      const { data, error } = await supabase.functions.invoke('transcribe-audio', {
+      const { data, error } = await supabase.functions.invoke('transcribe-audio-live', {
         body: { audio: base64Audio }
       });
 

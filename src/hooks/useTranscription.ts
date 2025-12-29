@@ -30,7 +30,7 @@ export function useTranscription() {
       reader.readAsDataURL(audioBlob);
       const base64Audio = await base64Promise;
 
-      const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio', {
+      const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-live', {
         body: { audio: base64Audio }
       });
 
