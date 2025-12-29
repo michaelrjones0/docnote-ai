@@ -6,6 +6,26 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Supported formats for AWS Transcribe Medical
+const SUPPORTED_FORMATS = ['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm'];
+
+function getMediaFormat(mimeType: string): string | null {
+  const mimeToFormat: Record<string, string> = {
+    'audio/webm': 'webm',
+    'audio/webm;codecs=opus': 'webm',
+    'audio/ogg': 'ogg',
+    'audio/ogg;codecs=opus': 'ogg',
+    'audio/mp3': 'mp3',
+    'audio/mpeg': 'mp3',
+    'audio/wav': 'wav',
+    'audio/x-wav': 'wav',
+    'audio/flac': 'flac',
+    'audio/mp4': 'mp4',
+    'audio/amr': 'amr',
+  };
+  return mimeToFormat[mimeType.toLowerCase()] || null;
+}
+
 // Process base64 in chunks to prevent memory issues
 function processBase64Chunks(base64String: string, chunkSize = 32768): Uint8Array {
   const chunks: Uint8Array[] = [];
@@ -133,6 +153,7 @@ async function uploadToS3(
   data: Uint8Array,
   bucket: string,
   key: string,
+  contentType: string,
   accessKeyId: string,
   secretAccessKey: string,
   region: string
@@ -142,7 +163,7 @@ async function uploadToS3(
   const headers = await signRequest(
     'PUT',
     url,
-    { 'Content-Type': 'audio/webm' },
+    { 'Content-Type': contentType },
     data,
     's3',
     region,
@@ -168,6 +189,7 @@ async function startMedicalTranscriptionJob(
   jobName: string,
   s3Uri: string,
   outputBucket: string,
+  mediaFormat: string,
   accessKeyId: string,
   secretAccessKey: string,
   region: string,
@@ -178,7 +200,7 @@ async function startMedicalTranscriptionJob(
   const requestBody = JSON.stringify({
     MedicalTranscriptionJobName: jobName,
     LanguageCode: languageCode,
-    MediaFormat: 'webm',
+    MediaFormat: mediaFormat,
     Media: {
       MediaFileUri: s3Uri
     },
@@ -299,16 +321,123 @@ async function deleteMedicalTranscriptionJob(
   });
 }
 
+interface TranscriptSegment {
+  content: string;
+  speaker: string;
+  startMs: number;
+  endMs: number;
+}
+
+function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segments: TranscriptSegment[] } {
+  const results = transcriptData.results;
+  const transcriptText = results?.transcripts?.[0]?.transcript || '';
+  const segments: TranscriptSegment[] = [];
+
+  // Parse speaker labels if available
+  const speakerLabels = results?.speaker_labels;
+  const items = results?.items || [];
+
+  if (speakerLabels?.segments) {
+    for (const segment of speakerLabels.segments) {
+      const speaker = segment.speaker_label || 'spk_0';
+      const startMs = Math.round(parseFloat(segment.start_time || '0') * 1000);
+      const endMs = Math.round(parseFloat(segment.end_time || '0') * 1000);
+      
+      // Collect words for this segment
+      const segmentItems = segment.items || [];
+      const words: string[] = [];
+      
+      for (const item of segmentItems) {
+        // Find matching content item
+        const contentItem = items.find((ci: any) => 
+          ci.start_time === item.start_time && ci.end_time === item.end_time
+        );
+        if (contentItem?.alternatives?.[0]?.content) {
+          words.push(contentItem.alternatives[0].content);
+        }
+      }
+      
+      if (words.length > 0) {
+        segments.push({
+          content: words.join(' '),
+          speaker,
+          startMs,
+          endMs
+        });
+      }
+    }
+  } else if (items.length > 0) {
+    // Fallback: group items without speaker labels
+    let currentSegment: { words: string[]; startMs: number; endMs: number } | null = null;
+    
+    for (const item of items) {
+      if (item.type === 'pronunciation') {
+        const word = item.alternatives?.[0]?.content || '';
+        const startMs = Math.round(parseFloat(item.start_time || '0') * 1000);
+        const endMs = Math.round(parseFloat(item.end_time || '0') * 1000);
+        
+        if (!currentSegment) {
+          currentSegment = { words: [word], startMs, endMs };
+        } else if (startMs - currentSegment.endMs > 2000) {
+          // Gap > 2 seconds, start new segment
+          segments.push({
+            content: currentSegment.words.join(' '),
+            speaker: 'spk_0',
+            startMs: currentSegment.startMs,
+            endMs: currentSegment.endMs
+          });
+          currentSegment = { words: [word], startMs, endMs };
+        } else {
+          currentSegment.words.push(word);
+          currentSegment.endMs = endMs;
+        }
+      } else if (item.type === 'punctuation' && currentSegment) {
+        const lastWord = currentSegment.words.pop();
+        if (lastWord) {
+          currentSegment.words.push(lastWord + (item.alternatives?.[0]?.content || ''));
+        }
+      }
+    }
+    
+    if (currentSegment && currentSegment.words.length > 0) {
+      segments.push({
+        content: currentSegment.words.join(' '),
+        speaker: 'spk_0',
+        startMs: currentSegment.startMs,
+        endMs: currentSegment.endMs
+      });
+    }
+  }
+
+  return { text: transcriptText, segments };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const { audio, languageCode = 'en-US' } = await req.json();
+    const { audio, languageCode = 'en-US', chunkIndex, mimeType = 'audio/webm' } = await req.json();
     
     if (!audio) {
       throw new Error('No audio data provided');
+    }
+
+    // Validate audio format
+    const mediaFormat = getMediaFormat(mimeType);
+    if (!mediaFormat) {
+      return new Response(
+        JSON.stringify({ 
+          error: `Unsupported audio format: ${mimeType}. Supported formats: ${SUPPORTED_FORMATS.join(', ')}`,
+          receivedFormat: mimeType,
+          supportedFormats: SUPPORTED_FORMATS
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
     }
 
     const AWS_ACCESS_KEY_ID = Deno.env.get('AWS_ACCESS_KEY_ID');
@@ -321,7 +450,7 @@ serve(async (req) => {
 
     const S3_BUCKET = 'apollohealth-transcription-us-west-2';
 
-    console.log('Processing live audio chunk with AWS Transcribe Medical...');
+    console.log(`Processing live audio chunk ${chunkIndex ?? 'N/A'} (${mimeType}) with AWS Transcribe Medical...`);
 
     // Process audio from base64 to binary
     const binaryAudio = processBase64Chunks(audio);
@@ -330,25 +459,27 @@ serve(async (req) => {
     const timestamp = Date.now();
     const chunkId = crypto.randomUUID().slice(0, 8);
     const jobName = `medical-live-${timestamp}-${chunkId}`;
-    const s3Key = `transcribe/live/${jobName}.webm`;
+    const fileExtension = mediaFormat === 'mp3' ? 'mp3' : mediaFormat;
+    const s3Key = `transcribe/live/${jobName}.${fileExtension}`;
 
-    // Upload to S3
+    // Upload to S3 with correct content type
     console.log('Uploading chunk to S3...');
     await uploadToS3(
-      binaryAudio, S3_BUCKET, s3Key,
+      binaryAudio, S3_BUCKET, s3Key, mimeType,
       AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
     );
 
     // Start medical transcription job
     console.log('Starting medical transcription job:', jobName);
     await startMedicalTranscriptionJob(
-      jobName, `s3://${S3_BUCKET}/${s3Key}`, S3_BUCKET,
+      jobName, `s3://${S3_BUCKET}/${s3Key}`, S3_BUCKET, mediaFormat,
       AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, languageCode
     );
 
     // Poll for completion (shorter timeout for live chunks)
-    const maxAttempts = 40; // ~40 seconds max for live chunks
+    const maxAttempts = 60; // ~60 seconds max for live chunks
     let transcriptText = '';
+    let segments: TranscriptSegment[] = [];
     
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -362,11 +493,13 @@ serve(async (req) => {
       if (jobStatus.status === 'COMPLETED' && jobStatus.transcriptUri) {
         const transcriptResponse = await fetch(jobStatus.transcriptUri);
         const transcriptData = await transcriptResponse.json();
-        transcriptText = transcriptData.results?.transcripts?.[0]?.transcript || '';
+        const parsed = parseTranscriptWithSpeakers(transcriptData);
+        transcriptText = parsed.text;
+        segments = parsed.segments;
         break;
       } else if (jobStatus.status === 'FAILED') {
         console.error('Medical transcription job failed:', jobStatus.failureReason);
-        break;
+        throw new Error(`Transcription failed: ${jobStatus.failureReason}`);
       }
     }
 
@@ -377,13 +510,14 @@ serve(async (req) => {
       console.warn('Cleanup warning:', cleanupError);
     }
 
-    console.log('Live medical transcription completed:', transcriptText.slice(0, 100));
+    console.log(`Live medical transcription completed: ${transcriptText.slice(0, 100)}, ${segments.length} segments`);
 
     return new Response(
       JSON.stringify({ 
         text: transcriptText,
-        isPartial: false,
-        confidence: 0.95
+        segments,
+        chunkIndex,
+        isPartial: false
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
