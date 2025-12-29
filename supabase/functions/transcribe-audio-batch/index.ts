@@ -142,31 +142,28 @@ serve(async (req) => {
 
     const AWS_ACCESS_KEY_ID = Deno.env.get('AWS_ACCESS_KEY_ID');
     const AWS_SECRET_ACCESS_KEY = Deno.env.get('AWS_SECRET_ACCESS_KEY');
-    const AWS_REGION = Deno.env.get('AWS_REGION') || 'us-east-1';
-    const AWS_S3_BUCKET = Deno.env.get('AWS_S3_BUCKET');
+    const AWS_REGION = Deno.env.get('AWS_REGION') || 'us-west-2';
 
     if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
       throw new Error('AWS credentials not configured');
     }
 
-    if (!AWS_S3_BUCKET) {
-      throw new Error('AWS_S3_BUCKET not configured');
-    }
+    const S3_BUCKET = 'apollohealth-transcription-us-west-2';
 
-    console.log('Starting batch transcription process...');
+    console.log('Starting batch medical transcription process...');
 
     // Process audio from base64 to binary
     const binaryAudio = processBase64Chunks(audio);
     
     // Generate unique filename for S3
     const timestamp = Date.now();
-    const audioKey = `encounters/${encounterId || 'unknown'}/${timestamp}-audio.webm`;
+    const audioKey = `transcribe/batch/${encounterId || 'unknown'}/${timestamp}-audio.webm`;
     
     // Step 1: Upload audio to S3
     console.log(`Uploading audio to S3: ${audioKey}`);
     await uploadToS3(
       binaryAudio,
-      AWS_S3_BUCKET,
+      S3_BUCKET,
       audioKey,
       AWS_ACCESS_KEY_ID,
       AWS_SECRET_ACCESS_KEY,
@@ -174,33 +171,33 @@ serve(async (req) => {
     );
     console.log('Audio uploaded to S3 successfully');
 
-    // Step 2: Start AWS Transcribe batch job
-    const jobName = `encounter-${encounterId || 'unknown'}-${timestamp}`;
-    const s3Uri = `s3://${AWS_S3_BUCKET}/${audioKey}`;
+    // Step 2: Start AWS Transcribe Medical batch job
+    const jobName = `medical-batch-${encounterId || 'unknown'}-${timestamp}`;
+    const s3Uri = `s3://${S3_BUCKET}/${audioKey}`;
     
-    console.log(`Starting transcription job: ${jobName}`);
-    const transcriptionJobArn = await startTranscriptionJob(
+    console.log(`Starting medical transcription job: ${jobName}`);
+    await startMedicalTranscriptionJob(
       jobName,
       s3Uri,
       languageCode,
-      AWS_S3_BUCKET,
+      S3_BUCKET,
       AWS_ACCESS_KEY_ID,
       AWS_SECRET_ACCESS_KEY,
       AWS_REGION
     );
-    console.log('Transcription job started:', transcriptionJobArn);
+    console.log('Medical transcription job started');
 
     // Step 3: Poll for job completion (with timeout)
     console.log('Polling for transcription completion...');
-    const transcriptResult = await pollTranscriptionJob(
+    const transcriptResult = await pollMedicalTranscriptionJob(
       jobName,
       AWS_ACCESS_KEY_ID,
       AWS_SECRET_ACCESS_KEY,
       AWS_REGION,
-      120000 // 2 minute timeout
+      180000 // 3 minute timeout for batch
     );
 
-    console.log('Batch transcription completed successfully');
+    console.log('Batch medical transcription completed successfully');
 
     return new Response(
       JSON.stringify({ 
@@ -245,7 +242,7 @@ async function uploadToS3(
     secretAccessKey
   );
 
-  const bodyBuffer = new Uint8Array(data).buffer as ArrayBuffer;
+  const bodyBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
   
   const response = await fetch(url, {
     method: 'PUT',
@@ -259,7 +256,7 @@ async function uploadToS3(
   }
 }
 
-async function startTranscriptionJob(
+async function startMedicalTranscriptionJob(
   jobName: string,
   s3Uri: string,
   languageCode: string,
@@ -267,22 +264,24 @@ async function startTranscriptionJob(
   accessKeyId: string,
   secretAccessKey: string,
   region: string
-): Promise<string> {
+): Promise<void> {
   const url = `https://transcribe.${region}.amazonaws.com`;
   
   const requestBody = JSON.stringify({
-    TranscriptionJobName: jobName,
+    MedicalTranscriptionJobName: jobName,
     LanguageCode: languageCode,
     MediaFormat: 'webm',
     Media: {
       MediaFileUri: s3Uri
     },
     OutputBucketName: outputBucket,
-    OutputKey: `transcripts/${jobName}.json`,
+    OutputKey: `transcribe/batch-output/${jobName}.json`,
+    Specialty: 'PRIMARYCARE',
+    Type: 'CONVERSATION',
     Settings: {
       ShowSpeakerLabels: true,
       MaxSpeakerLabels: 2,
-      ShowAlternatives: false
+      ChannelIdentification: false
     }
   });
 
@@ -291,7 +290,7 @@ async function startTranscriptionJob(
     url,
     {
       'Content-Type': 'application/x-amz-json-1.1',
-      'X-Amz-Target': 'Transcribe.StartTranscriptionJob'
+      'X-Amz-Target': 'Transcribe.StartMedicalTranscriptionJob'
     },
     requestBody,
     'transcribe',
@@ -308,14 +307,11 @@ async function startTranscriptionJob(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Transcribe job start failed: ${response.status} - ${errorText}`);
+    throw new Error(`Medical transcribe job start failed: ${response.status} - ${errorText}`);
   }
-
-  const result = await response.json();
-  return result.TranscriptionJob?.TranscriptionJobName || jobName;
 }
 
-async function pollTranscriptionJob(
+async function pollMedicalTranscriptionJob(
   jobName: string,
   accessKeyId: string,
   secretAccessKey: string,
@@ -326,29 +322,29 @@ async function pollTranscriptionJob(
   const pollInterval = 3000; // 3 seconds
 
   while (Date.now() - startTime < timeoutMs) {
-    const status = await getTranscriptionJobStatus(
+    const status = await getMedicalTranscriptionJobStatus(
       jobName,
       accessKeyId,
       secretAccessKey,
       region
     );
 
+    console.log(`Job ${jobName} status: ${status.status}`);
+
     if (status.status === 'COMPLETED') {
-      // Fetch the transcript from S3
       const transcript = await fetchTranscript(status.transcriptUri!);
       return transcript;
     } else if (status.status === 'FAILED') {
-      throw new Error(`Transcription job failed: ${status.failureReason}`);
+      throw new Error(`Medical transcription job failed: ${status.failureReason}`);
     }
 
-    // Wait before next poll
     await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
 
-  throw new Error('Transcription job timed out');
+  throw new Error('Medical transcription job timed out');
 }
 
-async function getTranscriptionJobStatus(
+async function getMedicalTranscriptionJobStatus(
   jobName: string,
   accessKeyId: string,
   secretAccessKey: string,
@@ -357,7 +353,7 @@ async function getTranscriptionJobStatus(
   const url = `https://transcribe.${region}.amazonaws.com`;
   
   const requestBody = JSON.stringify({
-    TranscriptionJobName: jobName
+    MedicalTranscriptionJobName: jobName
   });
 
   const headers = await signRequest(
@@ -365,7 +361,7 @@ async function getTranscriptionJobStatus(
     url,
     {
       'Content-Type': 'application/x-amz-json-1.1',
-      'X-Amz-Target': 'Transcribe.GetTranscriptionJob'
+      'X-Amz-Target': 'Transcribe.GetMedicalTranscriptionJob'
     },
     requestBody,
     'transcribe',
@@ -382,11 +378,11 @@ async function getTranscriptionJobStatus(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Get job status failed: ${response.status} - ${errorText}`);
+    throw new Error(`Get medical job status failed: ${response.status} - ${errorText}`);
   }
 
   const result = await response.json();
-  const job = result.TranscriptionJob;
+  const job = result.MedicalTranscriptionJob;
 
   return {
     status: job.TranscriptionJobStatus,
@@ -398,7 +394,6 @@ async function getTranscriptionJobStatus(
 async function fetchTranscript(
   transcriptUri: string
 ): Promise<{ text: string; speakers: any[]; items: any[] }> {
-  // The transcript URI is a pre-signed S3 URL
   const response = await fetch(transcriptUri);
   
   if (!response.ok) {
@@ -408,11 +403,9 @@ async function fetchTranscript(
   const data = await response.json();
   const results = data.results;
 
-  // Extract full transcript text
   const transcripts = results.transcripts || [];
   const fullText = transcripts.map((t: any) => t.transcript).join(' ');
 
-  // Extract speaker segments if available
   const speakerLabels = results.speaker_labels?.segments || [];
   const items = results.items || [];
 
