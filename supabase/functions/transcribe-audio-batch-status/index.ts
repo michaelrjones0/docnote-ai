@@ -1,25 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-
-function getCorsHeaders(origin: string | null): Record<string, string> {
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim()).filter(Boolean);
-  
-  if (allowedOrigins.length === 0) {
-    allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
-  }
-  
-  const isAllowed = origin && allowedOrigins.some(allowed => 
-    allowed === '*' || origin === allowed || origin.endsWith(allowed.replace('*', ''))
-  );
-  
-  return {
-    'Access-Control-Allow-Origin': isAllowed && origin ? origin : allowedOrigins[0],
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Vary': 'Origin',
-  };
-}
+import { getCorsHeaders, getAwsConfig } from "../_shared/env.ts";
 
 async function hmacSHA256(key: ArrayBuffer | Uint8Array, message: string): Promise<ArrayBuffer> {
   let keyBuffer: ArrayBuffer;
@@ -302,21 +284,16 @@ serve(async (req) => {
       );
     }
 
-    const AWS_ACCESS_KEY_ID = Deno.env.get('AWS_ACCESS_KEY_ID');
-    const AWS_SECRET_ACCESS_KEY = Deno.env.get('AWS_SECRET_ACCESS_KEY');
-    const AWS_REGION = Deno.env.get('AWS_REGION') || 'us-west-2';
-
-    if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-      throw new Error('AWS credentials not configured');
-    }
+    // Get validated AWS configuration
+    const awsConfig = getAwsConfig();
 
     console.log(`[${authResult.userId}] Checking batch job status: ${jobName}`);
 
     const jobStatus = await getMedicalTranscriptionJobStatus(
       jobName,
-      AWS_ACCESS_KEY_ID,
-      AWS_SECRET_ACCESS_KEY,
-      AWS_REGION
+      awsConfig.accessKeyId,
+      awsConfig.secretAccessKey,
+      awsConfig.region
     );
 
     console.log(`Job ${jobName} status: ${jobStatus.status}`);
