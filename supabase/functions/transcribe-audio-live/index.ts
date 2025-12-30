@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { getCorsHeaders, getAwsConfig } from "../_shared/env.ts";
 
 // Supported formats for AWS Transcribe Medical
 const SUPPORTED_FORMATS = ['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm'];
@@ -20,26 +21,6 @@ function getMediaFormat(mimeType: string): string | null {
     'audio/amr': 'amr',
   };
   return mimeToFormat[mimeType.toLowerCase()] || null;
-}
-
-function getCorsHeaders(origin: string | null): Record<string, string> {
-  const allowedOrigins = (Deno.env.get('ALLOWED_ORIGINS') || '').split(',').map(o => o.trim()).filter(Boolean);
-  
-  // Default to localhost for development if no origins configured
-  if (allowedOrigins.length === 0) {
-    allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
-  }
-  
-  const isAllowed = origin && allowedOrigins.some(allowed => 
-    allowed === '*' || origin === allowed || origin.endsWith(allowed.replace('*', ''))
-  );
-  
-  return {
-    'Access-Control-Allow-Origin': isAllowed && origin ? origin : allowedOrigins[0],
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Vary': 'Origin',
-  };
 }
 
 // Process base64 in chunks to prevent memory issues
@@ -495,19 +476,8 @@ serve(async (req) => {
       );
     }
 
-    const AWS_ACCESS_KEY_ID = Deno.env.get('AWS_ACCESS_KEY_ID');
-    const AWS_SECRET_ACCESS_KEY = Deno.env.get('AWS_SECRET_ACCESS_KEY');
-    const AWS_REGION = Deno.env.get('AWS_REGION') || 'us-west-2';
-    const S3_BUCKET = Deno.env.get('AWS_S3_BUCKET');
-    const S3_PREFIX = Deno.env.get('AWS_S3_PREFIX') || 'transcribe/';
-
-    if (!AWS_ACCESS_KEY_ID || !AWS_SECRET_ACCESS_KEY) {
-      throw new Error('AWS credentials not configured');
-    }
-
-    if (!S3_BUCKET) {
-      throw new Error('AWS_S3_BUCKET environment variable is required');
-    }
+    // Get validated AWS configuration
+    const awsConfig = getAwsConfig();
 
     console.log(`[${authResult.userId}] Processing live audio chunk ${chunkIndex ?? 'N/A'} (${mimeType}) with AWS Transcribe Medical...`);
 
@@ -517,18 +487,18 @@ serve(async (req) => {
     const chunkId = crypto.randomUUID().slice(0, 8);
     const jobName = `medical-live-${timestamp}-${chunkId}`;
     const fileExtension = mediaFormat;
-    const s3Key = `${S3_PREFIX}live/${jobName}.${fileExtension}`;
+    const s3Key = `${awsConfig.s3Prefix}live/${jobName}.${fileExtension}`;
 
     console.log('Uploading chunk to S3 with encryption...');
     await uploadToS3(
-      binaryAudio, S3_BUCKET, s3Key, mimeType,
-      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+      binaryAudio, awsConfig.s3Bucket, s3Key, mimeType,
+      awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
     );
 
     console.log('Starting medical transcription job:', jobName);
     await startMedicalTranscriptionJob(
-      jobName, `s3://${S3_BUCKET}/${s3Key}`, S3_BUCKET, S3_PREFIX, mediaFormat,
-      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, languageCode
+      jobName, `s3://${awsConfig.s3Bucket}/${s3Key}`, awsConfig.s3Bucket, awsConfig.s3Prefix, mediaFormat,
+      awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region, languageCode
     );
 
     const maxAttempts = 60;
@@ -539,7 +509,7 @@ serve(async (req) => {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       const jobStatus = await getMedicalTranscriptionJobStatus(
-        jobName, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+        jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
       );
       
       console.log(`Job ${jobName} status: ${jobStatus.status} (attempt ${attempt + 1})`);
@@ -558,7 +528,7 @@ serve(async (req) => {
     }
 
     try {
-      await deleteMedicalTranscriptionJob(jobName, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION);
+      await deleteMedicalTranscriptionJob(jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region);
     } catch (cleanupError) {
       console.warn('Cleanup warning:', cleanupError);
     }
