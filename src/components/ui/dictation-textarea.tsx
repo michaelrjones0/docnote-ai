@@ -1,20 +1,24 @@
 /**
- * DictationTextarea - AutoResizeTextarea with integrated dictation toggle.
+ * DictationTextarea - AutoResizeTextarea that registers with global dictation.
  * 
  * Features:
- * - Mic button in header area for each field
- * - Toggle on/off (not press-and-hold)
- * - Shows "Listening…" and "Transcribing…" states
- * - Inserts at cursor position or appends with smart spacing
- * - Only one field can listen at a time (enforced by useFieldDictation)
+ * - Registers/unregisters with DictationContext for focus tracking
+ * - Shows subtle highlight when receiving dictation
+ * - NO per-field mic button - uses global mic instead
+ * 
+ * ============================================================================
+ * DICTATION SMOKE TEST CHECKLIST:
+ * ============================================================================
+ * 1. Global mic ON → focus this field → speak → text appears here.
+ * 2. Switch focus to another field while mic is on → text goes to new field.
+ * 3. Click in middle of existing text, dictate → insertion at cursor (not append).
+ * 4. No console/network logs include transcript text or base64 audio data.
+ * ============================================================================
  */
 
 import * as React from 'react';
-import { Mic, MicOff, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { AutoResizeTextarea, AutoResizeTextareaProps } from '@/components/ui/auto-resize-textarea';
-import { useFieldDictation, DictationStatus } from '@/hooks/useFieldDictation';
-import { useToast } from '@/hooks/use-toast';
+import { useDictationContext } from '@/contexts/DictationContext';
 import { cn } from '@/lib/utils';
 
 interface DictationTextareaProps extends Omit<AutoResizeTextareaProps, 'onCopy'> {
@@ -27,77 +31,66 @@ interface DictationTextareaProps extends Omit<AutoResizeTextareaProps, 'onCopy'>
 
 export const DictationTextarea = React.forwardRef<HTMLTextAreaElement, DictationTextareaProps>(
   ({ fieldId, label, value, onChange, copyButton, className, ...props }, ref) => {
-    const { toast } = useToast();
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
     const cursorPositionRef = React.useRef<number | null>(null);
+    const valueRef = React.useRef(value);
+    
+    // Keep value ref updated
+    React.useEffect(() => {
+      valueRef.current = value;
+    }, [value]);
 
-    // Track cursor position on blur/selection change
+    const { 
+      registerField, 
+      unregisterField, 
+      setActiveField, 
+      activeFieldId, 
+      isDictating 
+    } = useDictationContext();
+
+    // Register field with context
+    React.useEffect(() => {
+      const registration = {
+        fieldId,
+        getValue: () => valueRef.current,
+        setValue: (newValue: string) => {
+          const syntheticEvent = {
+            target: { value: newValue },
+            currentTarget: { value: newValue },
+          } as React.ChangeEvent<HTMLTextAreaElement>;
+          onChange(syntheticEvent);
+        },
+        getSelectionStart: () => cursorPositionRef.current,
+        setSelectionStart: (pos: number) => {
+          cursorPositionRef.current = pos;
+        },
+      };
+
+      registerField(registration);
+
+      return () => {
+        unregisterField(fieldId);
+      };
+    }, [fieldId, registerField, unregisterField, onChange]);
+
+    // Track cursor position
     const handleSelectionChange = React.useCallback(() => {
       if (textareaRef.current) {
         cursorPositionRef.current = textareaRef.current.selectionStart;
       }
     }, []);
 
-    // Handle text insertion from dictation
-    const handleInsertText = React.useCallback((text: string) => {
-      const textarea = textareaRef.current;
-      const currentValue = value || '';
-      let insertPosition = cursorPositionRef.current;
-      
-      // Default to end if no cursor position
-      if (insertPosition === null || insertPosition === undefined) {
-        insertPosition = currentValue.length;
-      }
+    // Handle focus
+    const handleFocus = React.useCallback(() => {
+      setActiveField(fieldId);
+      handleSelectionChange();
+    }, [fieldId, setActiveField, handleSelectionChange]);
 
-      // Smart spacing: add space/newline if needed
-      let formattedText = text;
-      if (insertPosition > 0) {
-        const charBefore = currentValue[insertPosition - 1];
-        if (charBefore && !charBefore.match(/\s/)) {
-          // Add space if previous char is not whitespace
-          formattedText = ' ' + formattedText;
-        }
-      }
-      if (insertPosition < currentValue.length) {
-        const charAfter = currentValue[insertPosition];
-        if (charAfter && !charAfter.match(/\s/)) {
-          // Add space if next char is not whitespace
-          formattedText = formattedText + ' ';
-        }
-      }
-
-      // Create new value with inserted text
-      const newValue = 
-        currentValue.slice(0, insertPosition) + 
-        formattedText + 
-        currentValue.slice(insertPosition);
-
-      // Create synthetic event
-      const syntheticEvent = {
-        target: { value: newValue },
-        currentTarget: { value: newValue },
-      } as React.ChangeEvent<HTMLTextAreaElement>;
-
-      onChange(syntheticEvent);
-
-      // Update cursor position for next dictation
-      cursorPositionRef.current = insertPosition + formattedText.length;
-    }, [value, onChange]);
-
-    // Handle errors
-    const handleError = React.useCallback((error: string) => {
-      toast({
-        title: 'Dictation Error',
-        description: error,
-        variant: 'destructive',
-      });
-    }, [toast]);
-
-    const { status, toggle } = useFieldDictation({
-      fieldId,
-      onInsertText: handleInsertText,
-      onError: handleError,
-    });
+    // Handle blur - keep last active for a moment
+    const handleBlur = React.useCallback(() => {
+      // Don't immediately clear - let context handle via lastActiveFieldIdRef
+      handleSelectionChange();
+    }, [handleSelectionChange]);
 
     // Combine refs
     const setRefs = React.useCallback((node: HTMLTextAreaElement | null) => {
@@ -109,78 +102,38 @@ export const DictationTextarea = React.forwardRef<HTMLTextAreaElement, Dictation
       }
     }, [ref]);
 
-    // Get status display
-    const getStatusBadge = () => {
-      switch (status) {
-        case 'listening':
-          return (
-            <span className="flex items-center gap-1 text-xs text-destructive font-medium animate-pulse">
-              <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
-              Listening…
-            </span>
-          );
-        case 'transcribing':
-          return (
-            <span className="flex items-center gap-1 text-xs text-primary font-medium">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Transcribing…
-            </span>
-          );
-        default:
-          return null;
-      }
-    };
-
-    const getMicButton = () => {
-      const isListening = status === 'listening';
-      const isTranscribing = status === 'transcribing';
-      const isDisabled = isTranscribing;
-
-      return (
-        <Button
-          type="button"
-          variant={isListening ? 'destructive' : 'ghost'}
-          size="sm"
-          onClick={toggle}
-          disabled={isDisabled}
-          className={cn(
-            'h-7 w-7 p-0',
-            isListening && 'animate-pulse'
-          )}
-          title={isListening ? 'Stop dictation' : 'Start dictation'}
-        >
-          {isListening ? (
-            <MicOff className="h-3.5 w-3.5" />
-          ) : isTranscribing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Mic className="h-3.5 w-3.5" />
-          )}
-        </Button>
-      );
-    };
+    // Is this field receiving dictation?
+    const isReceivingDictation = isDictating && activeFieldId === fieldId;
 
     return (
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {getMicButton()}
             <span className="font-semibold text-sm text-primary uppercase tracking-wide">
               {label}
             </span>
-            {getStatusBadge()}
+            {isReceivingDictation && (
+              <span className="flex items-center gap-1 text-xs text-destructive font-medium animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
+                Receiving…
+              </span>
+            )}
           </div>
           {copyButton}
         </div>
         <AutoResizeTextarea
           ref={setRefs}
           value={value}
-          onChange={onChange}
-          onBlur={handleSelectionChange}
+          onChange={(e) => {
+            onChange(e);
+            handleSelectionChange();
+          }}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           onClick={handleSelectionChange}
           onKeyUp={handleSelectionChange}
           className={cn(
-            status === 'listening' && 'ring-2 ring-destructive ring-offset-1',
+            isReceivingDictation && 'ring-2 ring-destructive ring-offset-1',
             className
           )}
           {...props}
