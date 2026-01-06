@@ -278,10 +278,19 @@ async function verifyJWT(req: Request): Promise<{ userId: string } | null> {
 
 serve(async (req) => {
   const origin = req.headers.get('Origin');
-  const corsHeaders = getCorsHeaders(origin);
+  const { headers: corsHeaders, isAllowed: originAllowed } = getCorsHeaders(origin);
 
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // Block requests from disallowed origins
+  if (!originAllowed) {
+    console.warn(`Blocked request from disallowed origin: ${origin}`);
+    return new Response(
+      JSON.stringify({ error: 'Origin not allowed' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   // Verify JWT
