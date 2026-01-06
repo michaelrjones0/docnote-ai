@@ -5,6 +5,62 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+interface Preferences {
+  detailLevel: 'Brief' | 'Standard' | 'Detailed';
+  planFormat: 'Bullets' | 'Paragraph';
+  firstPerson: boolean;
+  patientQuotes: boolean;
+}
+
+const validatePreferences = (prefs: any): Preferences => {
+  return {
+    detailLevel: ['Brief', 'Standard', 'Detailed'].includes(prefs?.detailLevel) 
+      ? prefs.detailLevel 
+      : 'Standard',
+    planFormat: ['Bullets', 'Paragraph'].includes(prefs?.planFormat) 
+      ? prefs.planFormat 
+      : 'Bullets',
+    firstPerson: typeof prefs?.firstPerson === 'boolean' ? prefs.firstPerson : false,
+    patientQuotes: typeof prefs?.patientQuotes === 'boolean' ? prefs.patientQuotes : true,
+  };
+};
+
+const buildPreferenceInstructions = (prefs: Preferences): string => {
+  const instructions: string[] = [];
+
+  // Detail level
+  if (prefs.detailLevel === 'Brief') {
+    instructions.push('DETAIL LEVEL: Write very concise notes. Use 1-2 sentences per section. Focus on essential clinical information only.');
+  } else if (prefs.detailLevel === 'Detailed') {
+    instructions.push('DETAIL LEVEL: Write comprehensive notes with more specifics from the transcript. Include relevant context and nuance, but ONLY information present in the transcript.');
+  } else {
+    instructions.push('DETAIL LEVEL: Write notes with typical clinic note detail - balanced between brevity and completeness.');
+  }
+
+  // Plan format
+  if (prefs.planFormat === 'Bullets') {
+    instructions.push('PLAN FORMAT: Format the plan as a bullet list using "- " prefix for each item.');
+  } else {
+    instructions.push('PLAN FORMAT: Write the plan as a flowing paragraph, not bullet points.');
+  }
+
+  // First person voice
+  if (prefs.firstPerson) {
+    instructions.push('VOICE: Use first-person clinician voice ("I examined...", "I recommend...").');
+  } else {
+    instructions.push('VOICE: Use neutral clinical voice. Avoid "I will...", "I plan to...", "I am...". Write in active but impersonal clinical style.');
+  }
+
+  // Patient quotes
+  if (prefs.patientQuotes) {
+    instructions.push('QUOTES: Include direct patient quotes when clinically meaningful (e.g., "Patient states: \'The pain is a 7 out of 10\'").');
+  } else {
+    instructions.push('QUOTES: Paraphrase patient statements. Do not include direct quotes.');
+  }
+
+  return instructions.join('\n\n');
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -17,8 +73,12 @@ serve(async (req) => {
       chiefComplaint, 
       patientContext, 
       previousVisits,
-      chronicConditions 
+      chronicConditions,
+      preferences: rawPreferences
     } = await req.json();
+
+    const preferences = validatePreferences(rawPreferences);
+    console.log('Preferences applied:', preferences);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
@@ -46,19 +106,24 @@ ${chronicConditions.map((c: any) => `- ${c.condition_name}${c.icd_code ? ` (${c.
 `;
     }
 
+    const preferenceInstructions = buildPreferenceInstructions(preferences);
+
     // For SOAP notes, use structured JSON output
     if (noteType === 'SOAP') {
       const soapSystemPrompt = `You are an expert medical scribe assistant. Your task is to generate a SOAP note from clinical encounter transcripts.
 
-CRITICAL INSTRUCTIONS:
+## PHYSICIAN PREFERENCES (apply these strictly):
+${preferenceInstructions}
+
+## CRITICAL INSTRUCTIONS:
 
 1. SUBJECTIVE:
    - Summarize the patient's reported symptoms and history of present illness.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   - If the patient gave a direct quote that is clinically meaningful, include it in quotes.
+   ${preferences.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct.
 
-2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL:
+2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
    - Do NOT invent or hallucinate objective data.
    - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
    - Do NOT write plausible-sounding exam findings that are not in the transcript.
@@ -73,12 +138,11 @@ CRITICAL INSTRUCTIONS:
 4. PLAN - ACTIONABLE AND CONCISE:
    - Write the plan as concrete actions taken or to be taken, NOT intentions.
    - BAD: "I plan to work with the patient..." or "We will continue to monitor..."
-   - GOOD: "Reviewed approach to solving Rubik's cube; practiced steps with patient." or "Start metformin 500mg BID. Follow up in 2 weeks."
+   - GOOD: ${preferences.planFormat === 'Bullets' ? '"- Reviewed approach\\n- Practiced steps with patient\\n- Follow up in 2 weeks"' : '"Reviewed approach to solving Rubik\'s cube and practiced steps with patient. Follow up scheduled for 2 weeks."'}
+   ${preferences.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
    - Use active voice. State what was done or will be done.
 
-5. Write from the clinician's first-person perspective using "I" statements where appropriate.
-
-6. You must output ONLY valid JSON matching this exact structure:
+5. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
     "subjective": "string - patient's reported symptoms/history, concise, no filler",
@@ -89,7 +153,7 @@ CRITICAL INSTRUCTIONS:
   "markdown": "formatted markdown note with ## headers for each SOAP section"
 }
 
-7. The markdown field should be a nicely formatted clinical note with:
+6. The markdown field should be a nicely formatted clinical note with:
    ## Subjective
    [content]
    
@@ -118,7 +182,7 @@ ${previousContextSection}
 ${transcript}
 
 Remember: 
-- Write from my perspective as the clinician using "I" statements.
+- Apply the physician preferences strictly.
 - For Objective: ONLY include findings explicitly stated in the transcript. If no objective data is mentioned, write "Not documented."
 - Output ONLY valid JSON with "soap" object and "markdown" string.`;
 

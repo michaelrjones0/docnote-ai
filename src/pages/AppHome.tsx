@@ -8,8 +8,11 @@ import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings } from 'lucide-react';
 import { useDocNoteSession } from '@/hooks/useDocNoteSession';
+import { usePhysicianPreferences } from '@/hooks/usePhysicianPreferences';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
 interface SoapData {
@@ -39,6 +42,7 @@ const AppHome = () => {
   const [isStartingBatch, setIsStartingBatch] = useState(false);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const { preferences, setPreferences } = usePhysicianPreferences();
 
   const {
     session: docSession,
@@ -204,7 +208,8 @@ const AppHome = () => {
       const { data, error } = await supabase.functions.invoke('generate-note', {
         body: { 
           noteType: 'SOAP',
-          transcript 
+          transcript,
+          preferences
         }
       });
 
@@ -427,6 +432,71 @@ const AppHome = () => {
                 {batchStatusResult}
               </pre>
             )}
+
+            {/* Physician Preferences Panel */}
+            <div className="border rounded-lg p-4 bg-muted/30">
+              <div className="flex items-center gap-2 mb-4">
+                <Settings className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium text-sm">Physician Preferences</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="detailLevel" className="text-sm">Detail Level</Label>
+                  <Select
+                    value={preferences.detailLevel}
+                    onValueChange={(value: 'Brief' | 'Standard' | 'Detailed') => 
+                      setPreferences({ detailLevel: value })
+                    }
+                  >
+                    <SelectTrigger id="detailLevel">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Brief">Brief</SelectItem>
+                      <SelectItem value="Standard">Standard</SelectItem>
+                      <SelectItem value="Detailed">Detailed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="planFormat" className="text-sm">Plan Format</Label>
+                  <Select
+                    value={preferences.planFormat}
+                    onValueChange={(value: 'Bullets' | 'Paragraph') => 
+                      setPreferences({ planFormat: value })
+                    }
+                  >
+                    <SelectTrigger id="planFormat">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Bullets">Bullets</SelectItem>
+                      <SelectItem value="Paragraph">Paragraph</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="firstPerson" className="text-sm cursor-pointer">
+                    First-person clinician voice
+                  </Label>
+                  <Switch
+                    id="firstPerson"
+                    checked={preferences.firstPerson}
+                    onCheckedChange={(checked) => setPreferences({ firstPerson: checked })}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="patientQuotes" className="text-sm cursor-pointer">
+                    Include patient quotes
+                  </Label>
+                  <Switch
+                    id="patientQuotes"
+                    checked={preferences.patientQuotes}
+                    onCheckedChange={(checked) => setPreferences({ patientQuotes: checked })}
+                  />
+                </div>
+              </div>
+            </div>
 
             <Button 
               onClick={handleGenerateSoap} 
