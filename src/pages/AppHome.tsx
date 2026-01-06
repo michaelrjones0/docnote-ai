@@ -90,6 +90,14 @@ const AppHome = () => {
 
   // Live Scribe
   const liveTranscriptRef = useRef<HTMLPreElement>(null);
+  const conflictBannerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to conflict banner when it appears
+  useEffect(() => {
+    if (showConflictBanner && conflictBannerRef.current) {
+      conflictBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showConflictBanner]);
   const liveScribe = useLiveScribe({
     onTranscriptUpdate: (transcript) => {
       setTranscriptText(transcript);
@@ -433,37 +441,7 @@ const AppHome = () => {
             </CardHeader>
           </Card>
 
-        {/* Conflict Banner */}
-        {showConflictBanner && (
-          <Card className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
-            <CardContent className="py-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-600" />
-                  <span className="text-sm font-medium">
-                    New AI note generated. Replace your edits?
-                  </span>
-                </div>
-                <div className="flex gap-2">
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={keepUserEdits}
-                  >
-                    Keep my edits
-                  </Button>
-                  <Button 
-                    variant="default" 
-                    size="sm" 
-                    onClick={acceptNewGenerated}
-                  >
-                    Replace edits
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* Conflict Banner - now rendered inside SOAP Note section */}
 
         {/* Mode Mismatch Warning */}
         {modeMismatchWarning && (
@@ -954,6 +932,39 @@ const AppHome = () => {
             </div>
           </CardHeader>
           <CardContent>
+            {/* Conflict Banner - positioned directly above SOAP fields */}
+            {showConflictBanner && (
+              <div 
+                ref={conflictBannerRef}
+                className="mb-4 p-4 rounded-lg border border-amber-500 bg-amber-50 dark:bg-amber-950/20"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                    <span className="text-sm font-medium">
+                      New AI note generated. Replace your edits?
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={keepUserEdits}
+                    >
+                      Keep my edits
+                    </Button>
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={acceptNewGenerated}
+                    >
+                      Replace edits
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 4-FIELD MODE */}
             {currentSoap && currentNoteType === 'SOAP_4_FIELD' && (
               <div className="space-y-4">
