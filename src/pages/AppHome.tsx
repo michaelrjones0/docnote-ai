@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 import { useDocNoteSession } from '@/hooks/useDocNoteSession';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
@@ -495,12 +495,11 @@ const AppHome = () => {
                     <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
                       Subjective
                     </Label>
-                    <Textarea
+                    <AutoResizeTextarea
                       id="soap-subjective"
                       value={currentSoap.subjective || ''}
                       onChange={(e) => editSoapField('subjective', e.target.value)}
                       placeholder="Not documented."
-                      className="min-h-[100px] resize-y"
                     />
                   </div>
                   
@@ -508,12 +507,11 @@ const AppHome = () => {
                     <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
                       Objective
                     </Label>
-                    <Textarea
+                    <AutoResizeTextarea
                       id="soap-objective"
                       value={currentSoap.objective || ''}
                       onChange={(e) => editSoapField('objective', e.target.value)}
                       placeholder="Not documented."
-                      className="min-h-[100px] resize-y"
                     />
                   </div>
                   
@@ -521,12 +519,11 @@ const AppHome = () => {
                     <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
                       Assessment
                     </Label>
-                    <Textarea
+                    <AutoResizeTextarea
                       id="soap-assessment"
                       value={currentSoap.assessment || ''}
                       onChange={(e) => editSoapField('assessment', e.target.value)}
                       placeholder="Not documented."
-                      className="min-h-[100px] resize-y"
                     />
                   </div>
                   
@@ -534,12 +531,11 @@ const AppHome = () => {
                     <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
                       Plan
                     </Label>
-                    <Textarea
+                    <AutoResizeTextarea
                       id="soap-plan"
                       value={currentSoap.plan || ''}
                       onChange={(e) => editSoapField('plan', e.target.value)}
                       placeholder="Not documented."
-                      className="min-h-[100px] resize-y"
                     />
                   </div>
                 </div>
