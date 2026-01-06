@@ -495,6 +495,44 @@ const AppHome = () => {
                     onCheckedChange={(checked) => setPreferences({ patientQuotes: checked })}
                   />
                 </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="assessmentProblemList" className="text-sm cursor-pointer">
+                    Assessment as problem list
+                  </Label>
+                  <Switch
+                    id="assessmentProblemList"
+                    checked={preferences.assessmentProblemList}
+                    onCheckedChange={(checked) => setPreferences({ assessmentProblemList: checked })}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="includeFollowUpLine" className="text-sm cursor-pointer">
+                    Plan includes follow-up line
+                  </Label>
+                  <Switch
+                    id="includeFollowUpLine"
+                    checked={preferences.includeFollowUpLine}
+                    onCheckedChange={(checked) => setPreferences({ includeFollowUpLine: checked })}
+                  />
+                </div>
+              </div>
+              
+              {/* Custom Style Instructions */}
+              <div className="mt-4 space-y-2">
+                <Label htmlFor="styleText" className="text-sm">My style preferences (optional)</Label>
+                <AutoResizeTextarea
+                  id="styleText"
+                  value={preferences.styleText}
+                  onChange={(e) => setPreferences({ styleText: e.target.value })}
+                  placeholder="Examples:
+• Keep assessment as problem list, no sentences.
+• Plan should include return precautions when mentioned.
+• Avoid filler like 'patient presents today'."
+                  className="min-h-[80px] text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Style only. Cannot add facts not in transcript. ({preferences.styleText.length}/600)
+                </p>
               </div>
             </div>
 

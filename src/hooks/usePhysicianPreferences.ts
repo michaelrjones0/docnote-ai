@@ -5,15 +5,22 @@ export interface PhysicianPreferences {
   planFormat: 'Bullets' | 'Paragraph';
   firstPerson: boolean;
   patientQuotes: boolean;
+  styleText: string;
+  assessmentProblemList: boolean;
+  includeFollowUpLine: boolean;
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
+const MAX_STYLE_TEXT_LENGTH = 600;
 
 const getDefaultPreferences = (): PhysicianPreferences => ({
   detailLevel: 'Standard',
   planFormat: 'Bullets',
   firstPerson: false,
   patientQuotes: true,
+  styleText: '',
+  assessmentProblemList: true,
+  includeFollowUpLine: true,
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -30,6 +37,11 @@ const loadPreferences = (): PhysicianPreferences => {
           : 'Bullets',
         firstPerson: typeof parsed.firstPerson === 'boolean' ? parsed.firstPerson : false,
         patientQuotes: typeof parsed.patientQuotes === 'boolean' ? parsed.patientQuotes : true,
+        styleText: typeof parsed.styleText === 'string' 
+          ? parsed.styleText.slice(0, MAX_STYLE_TEXT_LENGTH) 
+          : '',
+        assessmentProblemList: typeof parsed.assessmentProblemList === 'boolean' ? parsed.assessmentProblemList : true,
+        includeFollowUpLine: typeof parsed.includeFollowUpLine === 'boolean' ? parsed.includeFollowUpLine : true,
       };
     }
   } catch (e) {
@@ -57,6 +69,10 @@ export const usePhysicianPreferences = () => {
   const setPreferences = useCallback((updates: Partial<PhysicianPreferences>) => {
     setPreferencesState(prev => {
       const newPrefs = { ...prev, ...updates };
+      // Enforce max length on styleText
+      if (newPrefs.styleText.length > MAX_STYLE_TEXT_LENGTH) {
+        newPrefs.styleText = newPrefs.styleText.slice(0, MAX_STYLE_TEXT_LENGTH);
+      }
       savePreferences(newPrefs);
       return newPrefs;
     });
