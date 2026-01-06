@@ -5,6 +5,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Loader2, LogOut, ShieldCheck } from 'lucide-react';
 
 const AppHome = () => {
@@ -15,6 +17,7 @@ const AppHome = () => {
   const [isTestingAuth, setIsTestingAuth] = useState(false);
   const [batchStatusResult, setBatchStatusResult] = useState<string | null>(null);
   const [isTestingBatchStatus, setIsTestingBatchStatus] = useState(false);
+  const [jobName, setJobName] = useState('');
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -87,7 +90,7 @@ const AppHome = () => {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ jobName }),
         }
       );
 
@@ -139,13 +142,27 @@ const AppHome = () => {
               </pre>
             )}
 
-            <Button onClick={handleTestBatchStatus} disabled={isTestingBatchStatus} className="w-full">
+            <div className="space-y-2">
+              <Label htmlFor="jobName">jobName</Label>
+              <Input
+                id="jobName"
+                placeholder="Enter jobName..."
+                value={jobName}
+                onChange={(e) => setJobName(e.target.value)}
+              />
+            </div>
+
+            <Button 
+              onClick={handleTestBatchStatus} 
+              disabled={isTestingBatchStatus || !jobName.trim()} 
+              className="w-full"
+            >
               {isTestingBatchStatus ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
                 <ShieldCheck className="h-4 w-4 mr-2" />
               )}
-              Test Batch Status
+              {!jobName.trim() ? 'Please enter jobName' : 'Test Batch Status'}
             </Button>
             
             {batchStatusResult && (
