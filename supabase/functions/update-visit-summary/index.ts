@@ -1,3 +1,4 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
@@ -5,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Timeout for AI gateway call (30 seconds)
+// Timeout for OpenAI call (30 seconds)
 const AI_TIMEOUT_MS = 30000;
 
 // Dev mode check - include detailed errors in response when not in production
@@ -48,11 +49,14 @@ serve(async (req) => {
     const body = await req.json();
     
     // Log received request keys for debugging
-    console.log('[update-visit-summary] Request body keys:', Object.keys(body));
+    console.log('[update-visit-summary] Request received:', {
+      keys: Object.keys(body),
+      timestamp: new Date().toISOString(),
+    });
     
     const { transcriptDelta, runningSummary, preferences } = body;
     
-    console.log('[update-visit-summary] Received:', {
+    console.log('[update-visit-summary] Payload details:', {
       transcriptDeltaLength: transcriptDelta?.length ?? 0,
       runningSummaryLength: runningSummary?.length ?? 0,
       hasPreferences: !!preferences,
@@ -70,17 +74,18 @@ serve(async (req) => {
       );
     }
 
-    // Use Lovable AI Gateway (LOVABLE_API_KEY is auto-provisioned)
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      console.error('[update-visit-summary] LOVABLE_API_KEY not found in environment');
-      return new Response(
-        JSON.stringify({ error: 'AI API key not configured (LOVABLE_API_KEY missing)' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    // Use OpenAI API directly
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    if (!OPENAI_API_KEY) {
+      console.error('[update-visit-summary] OPENAI_API_KEY not found in environment');
+      return buildErrorResponse(
+        'AI API key not configured',
+        500,
+        { message: 'OPENAI_API_KEY is missing from environment variables' }
       );
     }
     
-    console.log('[update-visit-summary] LOVABLE_API_KEY present, length:', LOVABLE_API_KEY.length);
+    console.log('[update-visit-summary] OPENAI_API_KEY present, length:', OPENAI_API_KEY.length);
 
     // Build the voice instruction
     const voiceInstruction = preferences?.firstPerson === true
@@ -117,7 +122,10 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
       ? `Previous summary:\n${runningSummary}\n\nNew transcript chunk:\n${transcriptDelta}`
       : `New transcript chunk:\n${transcriptDelta}`;
 
-    console.log('[update-visit-summary] Calling Lovable AI Gateway, transcript delta length:', transcriptDelta.length);
+    console.log('[update-visit-summary] Calling OpenAI API:', {
+      model: 'gpt-4o-mini',
+      transcriptDeltaLength: transcriptDelta.length,
+    });
 
     // Create abort controller for timeout
     const controller = new AbortController();
@@ -125,41 +133,49 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
 
     let aiResponse: Response;
     try {
-      aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
+          model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
           ],
+          max_tokens: 1000,
+          temperature: 0.3,
         }),
         signal: controller.signal,
       });
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-        console.error('[update-visit-summary] AI Gateway timeout after', AI_TIMEOUT_MS, 'ms');
-        return new Response(
-          JSON.stringify({ error: 'AI request timed out, please try again' }),
-          { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        console.error('[update-visit-summary] OpenAI timeout after', AI_TIMEOUT_MS, 'ms');
+        return buildErrorResponse(
+          'AI request timed out, please try again',
+          504,
+          { message: 'Request timed out after 30 seconds' }
         );
       }
+      // Log full fetch error server-side
+      console.error('[update-visit-summary] Fetch error:', {
+        message: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error',
+        stack: fetchError instanceof Error ? fetchError.stack : undefined,
+      });
       throw fetchError;
     } finally {
       clearTimeout(timeoutId);
     }
 
-    console.log('[update-visit-summary] AI Gateway response status:', aiResponse.status);
+    console.log('[update-visit-summary] OpenAI response status:', aiResponse.status);
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
       // Always log full error server-side
-      console.error('[update-visit-summary] AI Gateway error:', {
+      console.error('[update-visit-summary] OpenAI API error:', {
         status: aiResponse.status,
         statusText: aiResponse.statusText,
         errorBody: errorText,
@@ -174,10 +190,19 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
         );
       }
       
-      // Handle payment required
-      if (aiResponse.status === 402) {
+      // Handle auth errors
+      if (aiResponse.status === 401) {
         return buildErrorResponse(
-          'AI credits exhausted, please add funds',
+          'AI authentication failed',
+          500,
+          { message: 'OpenAI API key is invalid', details: errorText }
+        );
+      }
+      
+      // Handle quota exceeded
+      if (aiResponse.status === 402 || aiResponse.status === 403) {
+        return buildErrorResponse(
+          'AI quota exceeded or access denied',
           402,
           { details: errorText }
         );
@@ -186,22 +211,25 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
       return buildErrorResponse(
         'Failed to generate summary',
         500,
-        { message: `AI Gateway error: ${aiResponse.status}`, details: errorText }
+        { message: `OpenAI API error: ${aiResponse.status}`, details: errorText }
       );
     }
 
     const aiData = await aiResponse.json();
-    console.log('[update-visit-summary] AI response received, choices:', aiData.choices?.length);
+    console.log('[update-visit-summary] OpenAI response received:', {
+      choices: aiData.choices?.length,
+      usage: aiData.usage,
+    });
     
     const newSummary = aiData.choices?.[0]?.message?.content?.trim() || '';
 
     if (!newSummary) {
       const aiDataStr = JSON.stringify(aiData).slice(0, 1000);
-      console.error('[update-visit-summary] Empty summary from AI. Full response:', aiDataStr);
+      console.error('[update-visit-summary] Empty summary from OpenAI. Full response:', aiDataStr);
       return buildErrorResponse(
         'AI returned empty summary',
         500,
-        { message: 'No content in AI response', details: aiDataStr }
+        { message: 'No content in OpenAI response', details: aiDataStr }
       );
     }
 

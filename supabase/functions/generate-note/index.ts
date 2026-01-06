@@ -1,8 +1,39 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// Dev mode check - include detailed errors in response when not in production
+const isDevMode = () => {
+  const env = Deno.env.get('ENV') || Deno.env.get('DENO_ENV') || '';
+  const devFlag = Deno.env.get('DEV_MODE');
+  return devFlag === 'true' || (env !== 'production' && env !== 'prod');
+};
+
+// Helper to build error response with dev-only details
+const buildErrorResponse = (
+  genericMessage: string,
+  status: number,
+  devDetails?: { message?: string; stack?: string; details?: string }
+) => {
+  const isDev = isDevMode();
+  const responseBody: Record<string, unknown> = { error: genericMessage };
+  
+  if (isDev && devDetails) {
+    responseBody.dev = {
+      message: devDetails.message,
+      stack: devDetails.stack?.slice(0, 500),
+      details: devDetails.details?.slice(0, 1000),
+    };
+  }
+  
+  return new Response(
+    JSON.stringify(responseBody),
+    { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
 };
 
 interface Preferences {
@@ -91,8 +122,9 @@ ${prefs.styleText.trim()}`);
   return instructions.join('\n\n');
 };
 
-const buildStandardSoapSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
-  return `You are an expert medical scribe assistant. Your task is to generate a SOAP note from clinical encounter transcripts.
+// NEW: 3-field format (subjective, objective, assessmentPlan)
+const buildThreeFieldSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+  return `You are an expert medical scribe assistant. Your task is to generate a clinical note from encounter transcripts with 3 sections: Subjective, Objective, and Assessment/Plan (combined).
 
 ## PHYSICIAN PREFERENCES (apply these strictly):
 ${preferenceInstructions}
@@ -111,48 +143,39 @@ ${preferenceInstructions}
    - Do NOT write plausible-sounding exam findings that are not in the transcript.
    - Only include objective data that is EXPLICITLY stated in the transcript.
 
-3. ASSESSMENT - CLINICAL PROBLEM STATEMENT:
-   - Write the assessment as a clinical problem statement or diagnosis, NOT meta-language.
+3. ASSESSMENT/PLAN (COMBINED):
+   - Combine the assessment (clinical problem statement/diagnosis) with the plan (actionable steps).
+   - Start with the clinical problem(s), then the plan for each.
    - BAD: "I am assessing the patient for..." or "The assessment is that..."
-   - GOOD: "Difficulty solving Rubik's cube" or "Type 2 diabetes mellitus, uncontrolled" or "Acute upper respiratory infection"
-   - Be direct and clinical. State the problem or diagnosis.
-
-4. PLAN - ACTIONABLE AND CONCISE:
-   - Write the plan as concrete actions taken or to be taken, NOT intentions.
-   - BAD: "I plan to work with the patient..." or "We will continue to monitor..."
-   - GOOD: ${prefs.planFormat === 'Bullets' ? '"- Reviewed approach\\n- Practiced steps with patient\\n- Follow up in 2 weeks"' : '"Reviewed approach to solving Rubik\'s cube and practiced steps with patient. Follow up scheduled for 2 weeks."'}
-   ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
+   - GOOD: "1. Hypertension, uncontrolled - increase lisinopril to 20mg daily, recheck BP in 2 weeks"
+   ${prefs.planFormat === 'Bullets' ? '- Format the plan portion as bullet list with "- " prefix.' : '- Write the plan portion as flowing text.'}
    - Use active voice. State what was done or will be done.
 
-5. You must output ONLY valid JSON matching this exact structure:
+4. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
     "subjective": "string - patient's reported symptoms/history, concise, no filler",
     "objective": "string - exam findings OR 'Not documented.' if none in transcript",
-    "assessment": "string - clinical problem statement/diagnosis, NOT meta-language",
-    "plan": "string - actionable steps taken/to be taken, NOT intentions"
+    "assessmentPlan": "string - combined assessment and plan"
   },
-  "markdown": "formatted markdown note with ## headers for each SOAP section"
+  "markdown": "formatted markdown note with ## headers for each section"
 }
 
-6. The markdown field should be a nicely formatted clinical note with:
+5. The markdown field should be a nicely formatted clinical note with:
    ## Subjective
    [content]
    
    ## Objective
    [content]
    
-   ## Assessment
-   [content]
-   
-   ## Plan
+   ## Assessment & Plan
    [content]`;
 };
 
 const buildProblemOrientedSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
   const detailSentences = prefs.detailLevel === 'Brief' ? '1-2' : prefs.detailLevel === 'Detailed' ? '4-6' : '3-4';
   
-  return `You are an expert medical scribe assistant. Your task is to generate a PROBLEM-ORIENTED clinical note from encounter transcripts.
+  return `You are an expert medical scribe assistant. Your task is to generate a PROBLEM-ORIENTED clinical note from encounter transcripts with 3 sections: Subjective, Objective, and Assessment/Plan.
 
 ## PHYSICIAN PREFERENCES (apply these strictly):
 ${preferenceInstructions}
@@ -175,22 +198,19 @@ ${preferenceInstructions}
    - If objective findings ARE present, organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.) using ONLY stated findings.
    - Do NOT write plausible-sounding exam findings that are not in the transcript.
 
-4. ASSESSMENT AND PLAN (Problem-Oriented Format):
-   - Create a NUMBERED problem list.
+4. ASSESSMENT AND PLAN (Combined, Problem-Oriented Format):
+   - Create a NUMBERED problem list with assessment and plan combined for each.
    - For each problem include:
-     - Problem name/diagnosis
-     - Assessment: ${prefs.firstPerson ? 'Use first-person voice' : 'Use neutral clinical voice'}. ${prefs.assessmentProblemList ? 'Keep concise, problem-focused.' : 'May be brief narrative.'}
-     - Differential: ONLY if differential was explicitly discussed in transcript; otherwise OMIT this line entirely.
+     - Problem name/diagnosis with assessment
      - Plan: ${prefs.planFormat === 'Bullets' ? 'Format as bullet list with "- " prefix.' : 'Write as a flowing paragraph.'}
-   ${prefs.includeFollowUpLine ? '- If follow-up timing not stated, end the plan with "Follow up as needed."' : '- Only include follow-up if explicitly stated in transcript.'}
+   ${prefs.includeFollowUpLine ? '- If follow-up timing not stated, end with "Follow up as needed."' : '- Only include follow-up if explicitly stated in transcript.'}
 
 5. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
     "subjective": "string - full subjective content (problem-oriented format)",
     "objective": "string - exam findings OR 'Not documented.' if none in transcript",
-    "assessment": "string - combined assessment/problem list summaries",
-    "plan": "string - combined plan text (bullets or paragraph per preference)"
+    "assessmentPlan": "string - combined assessment and plan (problem-oriented)"
   },
   "markdown": "formatted problem-oriented markdown note"
 }
@@ -202,14 +222,12 @@ ${preferenceInstructions}
    ## Objective
    [system-based findings OR "Not documented."]
    
-   ## Assessment and Plan
-   1. **Problem Name**
-      - Assessment: [assessment text]
-      - Differential: [only if discussed, otherwise omit]
+   ## Assessment & Plan
+   1. **Problem Name** - [assessment text]
       - Plan: [plan items]
    
-   2. **Next Problem**
-      [etc.]`;
+   2. **Next Problem** - [assessment text]
+      - Plan: [plan items]`;
 };
 
 serve(async (req) => {
@@ -229,12 +247,25 @@ serve(async (req) => {
     } = await req.json();
 
     const preferences = validatePreferences(rawPreferences);
-    console.log('Preferences applied:', preferences);
+    console.log('[generate-note] Request received:', {
+      noteType,
+      transcriptLength: transcript?.length ?? 0,
+      hasPreferences: !!rawPreferences,
+      preferences,
+    });
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
+    // Use OpenAI API directly
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+    if (!OPENAI_API_KEY) {
+      console.error('[generate-note] OPENAI_API_KEY not found');
+      return buildErrorResponse(
+        'AI API key not configured',
+        500,
+        { message: 'OPENAI_API_KEY is missing from environment variables' }
+      );
     }
+    
+    console.log('[generate-note] OPENAI_API_KEY present, length:', OPENAI_API_KEY.length);
 
     // Build context from previous visits for chronic conditions
     let previousContextSection = '';
@@ -259,15 +290,15 @@ ${chronicConditions.map((c: any) => `- ${c.condition_name}${c.icd_code ? ` (${c.
 
     const preferenceInstructions = buildPreferenceInstructions(preferences);
 
-    // For SOAP note types (both SOAP and Problem-Oriented use structured JSON output)
+    // For SOAP note types (both SOAP and Problem-Oriented use structured JSON output with 3 fields)
     if (noteType === 'SOAP') {
       const isProblemOriented = preferences.noteStructure === 'Problem-Oriented';
       
       const soapSystemPrompt = isProblemOriented
         ? buildProblemOrientedSystemPrompt(preferences, preferenceInstructions)
-        : buildStandardSoapSystemPrompt(preferences, preferenceInstructions);
+        : buildThreeFieldSystemPrompt(preferences, preferenceInstructions);
 
-      const soapUserPrompt = `Generate a ${isProblemOriented ? 'Problem-Oriented' : 'SOAP'} note from this clinical encounter.
+      const soapUserPrompt = `Generate a ${isProblemOriented ? 'Problem-Oriented' : 'clinical'} note from this encounter.
 
 ## Patient Context:
 ${patientContext || 'No additional context provided'}
@@ -285,18 +316,21 @@ ${transcript}
 Remember: 
 - Apply the physician preferences strictly.
 - For Objective: ONLY include findings explicitly stated in the transcript. If no objective data is mentioned, write "Not documented."
-- Output ONLY valid JSON with "soap" object and "markdown" string.`;
+- Output ONLY valid JSON with "soap" object (subjective, objective, assessmentPlan) and "markdown" string.`;
 
-      console.log('Generating structured SOAP note with Lovable AI...');
+      console.log('[generate-note] Calling OpenAI API:', {
+        model: 'gpt-4o-mini',
+        isProblemOriented,
+      });
 
-      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'google/gemini-2.5-flash',
+          model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: soapSystemPrompt },
             { role: 'user', content: soapUserPrompt }
@@ -306,33 +340,62 @@ Remember:
         }),
       });
 
+      console.log('[generate-note] OpenAI response status:', response.status);
+
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('AI gateway error:', response.status, errorText);
+        console.error('[generate-note] OpenAI API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorBody: errorText,
+        });
         
         if (response.status === 429) {
-          return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }), {
-            status: 429,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
+          return buildErrorResponse(
+            'Rate limit exceeded. Please try again later.',
+            429,
+            { details: errorText }
+          );
         }
-        if (response.status === 402) {
-          return new Response(JSON.stringify({ error: 'AI credits exhausted. Please add funds.' }), {
-            status: 402,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          });
+        if (response.status === 401) {
+          return buildErrorResponse(
+            'AI authentication failed',
+            500,
+            { message: 'OpenAI API key is invalid', details: errorText }
+          );
         }
-        throw new Error(`AI gateway error: ${response.status}`);
+        if (response.status === 402 || response.status === 403) {
+          return buildErrorResponse(
+            'AI quota exceeded or access denied',
+            402,
+            { details: errorText }
+          );
+        }
+        return buildErrorResponse(
+          'Failed to generate note',
+          500,
+          { message: `OpenAI API error: ${response.status}`, details: errorText }
+        );
       }
 
       const data = await response.json();
       const rawContent = data.choices?.[0]?.message?.content;
 
+      console.log('[generate-note] OpenAI response received:', {
+        hasContent: !!rawContent,
+        contentLength: rawContent?.length ?? 0,
+        usage: data.usage,
+      });
+
       if (!rawContent) {
-        throw new Error('No content generated');
+        return buildErrorResponse(
+          'No content generated',
+          500,
+          { message: 'OpenAI returned empty response' }
+        );
       }
 
-      console.log('Raw AI response:', rawContent);
+      console.log('[generate-note] Raw AI response:', rawContent.slice(0, 500));
 
       // Parse the JSON response
       let parsed;
@@ -349,44 +412,42 @@ Remember:
         }
         parsed = JSON.parse(jsonStr.trim());
       } catch (parseError) {
-        console.error('Failed to parse AI response as JSON:', parseError);
-        console.error('Raw content was:', rawContent);
-        return new Response(JSON.stringify({ 
-          error: 'Failed to parse structured SOAP response from AI',
-          details: 'The AI did not return valid JSON'
-        }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        console.error('[generate-note] Failed to parse AI response as JSON:', parseError);
+        console.error('[generate-note] Raw content was:', rawContent);
+        return buildErrorResponse(
+          'Failed to parse structured response from AI',
+          500,
+          { message: 'The AI did not return valid JSON', details: rawContent.slice(0, 500) }
+        );
       }
 
-      // Validate the structure
+      // Validate the structure - now expecting 3 fields
       const soap = parsed?.soap;
       if (!soap || 
           typeof soap.subjective !== 'string' ||
           typeof soap.objective !== 'string' ||
-          typeof soap.assessment !== 'string' ||
-          typeof soap.plan !== 'string') {
-        console.error('Invalid SOAP structure:', parsed);
-        return new Response(JSON.stringify({ 
-          error: 'Invalid SOAP structure from AI',
-          details: 'Missing or invalid soap fields (subjective, objective, assessment, plan)'
-        }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+          typeof soap.assessmentPlan !== 'string') {
+        console.error('[generate-note] Invalid note structure:', parsed);
+        return buildErrorResponse(
+          'Invalid note structure from AI',
+          500,
+          { 
+            message: 'Missing or invalid fields (subjective, objective, assessmentPlan)',
+            details: JSON.stringify(parsed).slice(0, 500)
+          }
+        );
       }
 
       const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
-        `## Subjective\n${soap.subjective}\n\n## Objective\n${soap.objective}\n\n## Assessment\n${soap.assessment}\n\n## Plan\n${soap.plan}`;
+        `## Subjective\n${soap.subjective}\n\n## Objective\n${soap.objective}\n\n## Assessment & Plan\n${soap.assessmentPlan}`;
 
-      console.log('SOAP note generated successfully');
+      console.log('[generate-note] Note generated successfully with 3 fields');
 
       return new Response(JSON.stringify({ 
         noteType: 'SOAP',
         note: markdown,
         markdown: markdown,
-        soap: soap
+        soap: soap // Contains: subjective, objective, assessmentPlan
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -394,11 +455,10 @@ Remember:
 
     // For non-SOAP note types, use the original flow
     const noteTemplates: Record<string, string> = {
-      'SOAP': `Generate a SOAP note with these sections:
+      'SOAP': `Generate a clinical note with these sections:
 - Subjective: Patient's reported symptoms, history of present illness
 - Objective: Physical exam findings, vital signs, test results mentioned
-- Assessment: Diagnoses or differential diagnoses
-- Plan: Treatment plan, medications, follow-up`,
+- Assessment & Plan: Combined diagnoses and treatment plan`,
 
       'H&P': `Generate a History and Physical note with these sections:
 - Chief Complaint
@@ -473,17 +533,19 @@ ${transcript}
 
 Please generate the ${noteType} note now, written from my perspective as the clinician.`;
 
-    console.log('Generating note with Lovable AI...');
-    console.log('Note type:', noteType);
+    console.log('[generate-note] Generating non-SOAP note with OpenAI:', {
+      noteType,
+      model: 'gpt-4o-mini',
+    });
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -493,33 +555,54 @@ Please generate the ${noteType} note now, written from my perspective as the cli
       }),
     });
 
+    console.log('[generate-note] OpenAI response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('AI gateway error:', response.status, errorText);
+      console.error('[generate-note] OpenAI API error:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorText,
+      });
       
       if (response.status === 429) {
-        return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }), {
-          status: 429,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return buildErrorResponse(
+          'Rate limit exceeded. Please try again later.',
+          429,
+          { details: errorText }
+        );
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: 'AI credits exhausted. Please add funds.' }), {
-          status: 402,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+      if (response.status === 401) {
+        return buildErrorResponse(
+          'AI authentication failed',
+          500,
+          { message: 'OpenAI API key is invalid', details: errorText }
+        );
       }
-      throw new Error(`AI gateway error: ${response.status}`);
+      return buildErrorResponse(
+        'Failed to generate note',
+        500,
+        { message: `OpenAI API error: ${response.status}`, details: errorText }
+      );
     }
 
     const data = await response.json();
     const generatedNote = data.choices?.[0]?.message?.content;
 
+    console.log('[generate-note] OpenAI response received:', {
+      hasContent: !!generatedNote,
+      usage: data.usage,
+    });
+
     if (!generatedNote) {
-      throw new Error('No content generated');
+      return buildErrorResponse(
+        'No content generated',
+        500,
+        { message: 'OpenAI returned empty response' }
+      );
     }
 
-    console.log('Note generated successfully');
+    console.log('[generate-note] Non-SOAP note generated successfully');
 
     return new Response(JSON.stringify({ 
       note: generatedNote,
@@ -529,12 +612,18 @@ Please generate the ${noteType} note now, written from my perspective as the cli
     });
 
   } catch (error) {
-    console.error('Error in generate-note function:', error);
-    return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    console.error('[generate-note] Unhandled error:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      error,
     });
+    return buildErrorResponse(
+      'An unexpected error occurred',
+      500,
+      {
+        message: error instanceof Error ? error.message : 'Unknown server error',
+        stack: error instanceof Error ? error.stack : undefined,
+      }
+    );
   }
 });
