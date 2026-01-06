@@ -74,6 +74,7 @@ const AppHome = () => {
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [pendingSignatureName, setPendingSignatureName] = useState('');
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
+  const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
   const { preferences, setPreferences } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
@@ -406,7 +407,7 @@ const AppHome = () => {
     }
   }, [docSession.transcriptText, handleNewGenerated, toast]);
 
-  // Handler for saving signature and proceeding with generation
+  // Handler for saving signature - sets flag for effect-based generation
   const handleSaveSignature = useCallback(() => {
     const trimmedName = pendingSignatureName.trim();
     if (!trimmedName) {
@@ -420,11 +421,16 @@ const AppHome = () => {
     setPreferences({ clinicianDisplayName: trimmedName });
     setShowSignatureModal(false);
     setSignatureNeededMessage(false);
-    // Trigger generation after saving (with small delay to let state update)
-    setTimeout(() => {
+    setAutoGenerateAfterSignature(true);
+  }, [pendingSignatureName, setPreferences, toast]);
+
+  // Effect: trigger generation exactly once after signature is saved
+  useEffect(() => {
+    if (autoGenerateAfterSignature && preferences.clinicianDisplayName.trim()) {
+      setAutoGenerateAfterSignature(false);
       handleGenerateSoap();
-    }, 50);
-  }, [pendingSignatureName, setPreferences, handleGenerateSoap, toast]);
+    }
+  }, [autoGenerateAfterSignature, preferences.clinicianDisplayName, handleGenerateSoap]);
 
   const handleCancelSignature = useCallback(() => {
     setShowSignatureModal(false);
