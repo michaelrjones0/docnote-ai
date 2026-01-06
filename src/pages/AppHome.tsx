@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogOut, ShieldCheck, Play } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText } from 'lucide-react';
 
 const AppHome = () => {
   const { user, session, isLoading, signOut } = useAuth();
@@ -20,6 +20,8 @@ const AppHome = () => {
   const [jobName, setJobName] = useState('');
   const [startBatchResult, setStartBatchResult] = useState<string | null>(null);
   const [isStartingBatch, setIsStartingBatch] = useState(false);
+  const [soapResult, setSoapResult] = useState<string | null>(null);
+  const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -145,6 +147,50 @@ const AppHome = () => {
     }
   };
 
+  const getTranscriptFromBatchStatus = (): string | null => {
+    if (!batchStatusResult) return null;
+    try {
+      const parsed = JSON.parse(batchStatusResult);
+      return parsed?.transcript?.text || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleGenerateSoap = async () => {
+    const transcript = getTranscriptFromBatchStatus();
+    if (!transcript) {
+      toast({
+        title: 'No transcript available',
+        description: 'Please run "Test Batch Status" first to get a completed transcript.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsGeneratingSoap(true);
+    setSoapResult(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-note', {
+        body: { 
+          noteType: 'SOAP',
+          transcript 
+        }
+      });
+
+      if (error) {
+        setSoapResult(JSON.stringify({ ok: false, error: error.message }, null, 2));
+      } else {
+        setSoapResult(JSON.stringify(data, null, 2));
+      }
+    } catch (err) {
+      setSoapResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
+    } finally {
+      setIsGeneratingSoap(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -230,6 +276,26 @@ const AppHome = () => {
             {batchStatusResult && (
               <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
                 {batchStatusResult}
+              </pre>
+            )}
+
+            <Button 
+              onClick={handleGenerateSoap} 
+              disabled={isGeneratingSoap || !getTranscriptFromBatchStatus()} 
+              className="w-full"
+              variant="default"
+            >
+              {isGeneratingSoap ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4 mr-2" />
+              )}
+              {!getTranscriptFromBatchStatus() ? 'No transcript available' : 'Generate SOAP'}
+            </Button>
+            
+            {soapResult && (
+              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-60">
+                {soapResult}
               </pre>
             )}
           </div>
