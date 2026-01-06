@@ -255,85 +255,102 @@ const AppHome = () => {
     return null;
   }
 
+  const transcript = getTranscriptFromBatchStatus();
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl">You're logged in!</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6 text-center">
-          <p className="text-muted-foreground">
-            Signed in as: <span className="font-medium text-foreground">{user.email}</span>
-          </p>
-          
-          <div className="space-y-3">
-            <Button onClick={handleTestAuth} disabled={isTestingAuth} className="w-full">
-              {isTestingAuth ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <ShieldCheck className="h-4 w-4 mr-2" />
-              )}
-              Test Auth
-            </Button>
-            
+    <div className="min-h-screen bg-background p-4">
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Header */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-xl">DocNoteAI</CardTitle>
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-muted-foreground">{user.email}</span>
+                <Button onClick={handleLogout} variant="outline" size="sm">
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Log Out
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
+
+        {/* Controls */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Transcription Controls</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Button onClick={handleTestAuth} disabled={isTestingAuth}>
+                {isTestingAuth ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                )}
+                Test Auth
+              </Button>
+              
+              <Button 
+                onClick={handleStartBatchLatest} 
+                disabled={isStartingBatch} 
+                variant="secondary"
+              >
+                {isStartingBatch ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4 mr-2" />
+                )}
+                Start Batch (Latest Audio)
+              </Button>
+            </div>
+
             {authCheckResult && (
-              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
+              <pre className="bg-muted p-3 rounded-md text-sm overflow-auto max-h-32 font-mono">
                 {authCheckResult}
               </pre>
             )}
-
-            <Button 
-              onClick={handleStartBatchLatest} 
-              disabled={isStartingBatch} 
-              className="w-full"
-              variant="secondary"
-            >
-              {isStartingBatch ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4 mr-2" />
-              )}
-              Start Batch (Latest Audio)
-            </Button>
             
             {startBatchResult && (
-              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
+              <pre className="bg-muted p-3 rounded-md text-sm overflow-auto max-h-32 font-mono">
                 {startBatchResult}
               </pre>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="jobName">jobName</Label>
-              <Input
-                id="jobName"
-                placeholder="Enter jobName..."
-                value={jobName}
-                onChange={(e) => setJobName(e.target.value)}
-              />
+            <div className="flex gap-3 items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="jobName">Job Name</Label>
+                <Input
+                  id="jobName"
+                  placeholder="Enter jobName..."
+                  value={jobName}
+                  onChange={(e) => setJobName(e.target.value)}
+                  className="font-mono"
+                />
+              </div>
+              <Button 
+                onClick={() => handleTestBatchStatus()} 
+                disabled={isTestingBatchStatus || !jobName.trim()}
+              >
+                {isTestingBatchStatus ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4 mr-2" />
+                )}
+                Test Batch Status
+              </Button>
             </div>
-
-            <Button 
-              onClick={() => handleTestBatchStatus()} 
-              disabled={isTestingBatchStatus || !jobName.trim()} 
-              className="w-full"
-            >
-              {isTestingBatchStatus ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <ShieldCheck className="h-4 w-4 mr-2" />
-              )}
-              {!jobName.trim() ? 'Please enter jobName' : 'Test Batch Status'}
-            </Button>
             
             {batchStatusResult && (
-              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
+              <pre className="bg-muted p-3 rounded-md text-sm overflow-auto max-h-40 font-mono">
                 {batchStatusResult}
               </pre>
             )}
 
             <Button 
               onClick={handleGenerateSoap} 
-              disabled={isGeneratingSoap || !getTranscriptFromBatchStatus()} 
+              disabled={isGeneratingSoap || !transcript} 
               className="w-full"
               variant="default"
             >
@@ -342,84 +359,109 @@ const AppHome = () => {
               ) : (
                 <FileText className="h-4 w-4 mr-2" />
               )}
-              {!getTranscriptFromBatchStatus() ? 'No transcript available' : 'Generate SOAP'}
+              {!transcript ? 'No transcript available' : 'Generate SOAP'}
             </Button>
-            
-            {soapResult && (
-              <div className="text-left space-y-4">
-                {soapResult.error ? (
-                  <div className="bg-destructive/10 border border-destructive/20 p-3 rounded-md text-sm text-destructive">
-                    Error: {soapResult.error}
-                  </div>
-                ) : (
-                  <>
-                    {/* Transcript Section */}
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-semibold text-sm">Transcript</h4>
-                        <CopyButton text={getTranscriptFromBatchStatus()} label="Copy Transcript" />
-                      </div>
-                      <pre className="bg-muted p-3 rounded-md text-sm overflow-auto max-h-32 whitespace-pre-wrap">
-                        {getTranscriptFromBatchStatus()}
-                      </pre>
-                    </div>
+          </CardContent>
+        </Card>
 
-                    {/* SOAP Sections */}
-                    {soapResult.soap && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-sm">SOAP Note</h4>
-                          <div className="flex gap-2">
-                            <CopyButton text={soapResult.markdown} label="Copy SOAP (Markdown)" />
-                            <CopyButton text={JSON.stringify(soapResult, null, 2)} label="Copy JSON" />
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <div className="bg-muted/50 p-3 rounded-md">
-                            <h5 className="font-medium text-xs text-muted-foreground mb-1">SUBJECTIVE</h5>
-                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.subjective}</p>
-                          </div>
-                          
-                          <div className="bg-muted/50 p-3 rounded-md">
-                            <h5 className="font-medium text-xs text-muted-foreground mb-1">OBJECTIVE</h5>
-                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.objective}</p>
-                          </div>
-                          
-                          <div className="bg-muted/50 p-3 rounded-md">
-                            <h5 className="font-medium text-xs text-muted-foreground mb-1">ASSESSMENT</h5>
-                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.assessment}</p>
-                          </div>
-                          
-                          <div className="bg-muted/50 p-3 rounded-md">
-                            <h5 className="font-medium text-xs text-muted-foreground mb-1">PLAN</h5>
-                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.plan}</p>
-                          </div>
-                        </div>
-
-                        {/* Markdown Preview */}
-                        <details className="text-sm">
-                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                            View Raw Markdown
-                          </summary>
-                          <pre className="mt-2 bg-muted p-3 rounded-md overflow-auto max-h-40 whitespace-pre-wrap">
-                            {soapResult.markdown}
-                          </pre>
-                        </details>
-                      </div>
-                    )}
-                  </>
-                )}
+        {/* Transcript Section */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Transcript</CardTitle>
+              {transcript && (
+                <CopyButton text={transcript} label="Copy Transcript" />
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {transcript ? (
+              <pre className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-64 whitespace-pre-wrap font-mono border">
+                {transcript}
+              </pre>
+            ) : (
+              <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
+                No transcript loaded yet. Run "Start Batch" and "Test Batch Status" first.
               </div>
             )}
-          </div>
+          </CardContent>
+        </Card>
 
-          <Button onClick={handleLogout} variant="outline" className="w-full">
-            <LogOut className="h-4 w-4 mr-2" />
-            Log Out
-          </Button>
-        </CardContent>
-      </Card>
+        {/* SOAP Note Section */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">SOAP Note</CardTitle>
+              {soapResult && !soapResult.error && (
+                <div className="flex gap-2">
+                  <CopyButton 
+                    text={soapResult.markdown || soapResult.note || ''} 
+                    label="Copy SOAP" 
+                  />
+                  <CopyButton 
+                    text={JSON.stringify(soapResult, null, 2)} 
+                    label="Copy JSON" 
+                  />
+                </div>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {soapResult?.error ? (
+              <div className="bg-destructive/10 border border-destructive/20 p-4 rounded-md text-destructive">
+                Error: {soapResult.error}
+              </div>
+            ) : soapResult?.soap ? (
+              <div className="space-y-4">
+                {/* Structured SOAP Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="border rounded-lg p-4 bg-card">
+                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Subjective</h4>
+                    <p className="text-sm whitespace-pre-wrap">
+                      {soapResult.soap.subjective || 'Not documented.'}
+                    </p>
+                  </div>
+                  
+                  <div className="border rounded-lg p-4 bg-card">
+                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Objective</h4>
+                    <p className="text-sm whitespace-pre-wrap">
+                      {soapResult.soap.objective || 'Not documented.'}
+                    </p>
+                  </div>
+                  
+                  <div className="border rounded-lg p-4 bg-card">
+                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Assessment</h4>
+                    <p className="text-sm whitespace-pre-wrap">
+                      {soapResult.soap.assessment || 'Not documented.'}
+                    </p>
+                  </div>
+                  
+                  <div className="border rounded-lg p-4 bg-card">
+                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Plan</h4>
+                    <p className="text-sm whitespace-pre-wrap">
+                      {soapResult.soap.plan || 'Not documented.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Markdown Preview */}
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
+                    View Formatted Markdown
+                  </summary>
+                  <pre className="mt-3 bg-muted p-4 rounded-md overflow-auto max-h-64 whitespace-pre-wrap font-mono border">
+                    {soapResult.markdown || soapResult.note}
+                  </pre>
+                </details>
+              </div>
+            ) : (
+              <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
+                No SOAP note generated yet. Click "Generate SOAP" after loading a transcript.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
