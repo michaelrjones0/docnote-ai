@@ -563,13 +563,21 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
   };
 
   const handleClearSession = () => {
+    // Clear encounter-scoped session data
     clearSession();
     setBatchStatusResult(null);
     setStartBatchResult(null);
     setAuthCheckResult(null);
+    
+    // Clear encounter-scoped patient fields from preferences (keep physician-scoped)
+    setPreferences({ 
+      patientName: '', 
+      patientGender: undefined 
+    });
+    
     toast({
       title: 'Session cleared',
-      description: 'All data has been cleared.',
+      description: 'Encounter data and patient info cleared. Ready for a new patient.',
     });
   };
 
