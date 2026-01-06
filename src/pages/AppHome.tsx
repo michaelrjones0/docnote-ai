@@ -457,7 +457,7 @@ const AppHome = () => {
     // Clear patient-specific fields from preferences (keep clinician settings)
     setPreferences({ 
       patientName: '', 
-      patientGender: undefined 
+      patientGender: '' 
     });
     
     // Close dialog
@@ -572,7 +572,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
     // Clear encounter-scoped patient fields from preferences (keep physician-scoped)
     setPreferences({ 
       patientName: '', 
-      patientGender: undefined 
+      patientGender: '' 
     });
     
     toast({
