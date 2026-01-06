@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause, Pencil } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
@@ -70,6 +71,9 @@ const AppHome = () => {
   const [isStartingBatch, setIsStartingBatch] = useState(false);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [pendingSignatureName, setPendingSignatureName] = useState('');
+  const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
   const { preferences, setPreferences } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
@@ -316,9 +320,17 @@ const AppHome = () => {
       return;
     }
 
-    setIsGeneratingSoap(true);
-    // Always use the latest preferences from ref to avoid stale closure
+    // Check for signature before generating
     const currentPrefs = preferencesRef.current;
+    if (!currentPrefs.clinicianDisplayName.trim()) {
+      setPendingSignatureName('');
+      setShowSignatureModal(true);
+      return;
+    }
+
+    setIsGeneratingSoap(true);
+    setSignatureNeededMessage(false);
+    // Always use the latest preferences from ref to avoid stale closure
     const expectedMode = currentPrefs.noteEditorMode;
 
     try {
@@ -393,6 +405,36 @@ const AppHome = () => {
       setIsGeneratingSoap(false);
     }
   }, [docSession.transcriptText, handleNewGenerated, toast]);
+
+  // Handler for saving signature and proceeding with generation
+  const handleSaveSignature = useCallback(() => {
+    const trimmedName = pendingSignatureName.trim();
+    if (!trimmedName) {
+      toast({
+        title: 'Signature required',
+        description: 'Please enter your signature name.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setPreferences({ clinicianDisplayName: trimmedName });
+    setShowSignatureModal(false);
+    setSignatureNeededMessage(false);
+    // Trigger generation after saving (with small delay to let state update)
+    setTimeout(() => {
+      handleGenerateSoap();
+    }, 50);
+  }, [pendingSignatureName, setPreferences, handleGenerateSoap, toast]);
+
+  const handleCancelSignature = useCallback(() => {
+    setShowSignatureModal(false);
+    setSignatureNeededMessage(true);
+  }, []);
+
+  const handleOpenSignatureModal = useCallback(() => {
+    setPendingSignatureName(preferences.clinicianDisplayName);
+    setShowSignatureModal(true);
+  }, [preferences.clinicianDisplayName]);
 
   const copyToClipboard = async (text: string, fieldName: string) => {
     try {
@@ -1458,11 +1500,32 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-lg">Patient Instructions</CardTitle>
+                <div className="flex items-center gap-3">
+                  <CardTitle className="text-lg">Patient Instructions</CardTitle>
+                  <button
+                    onClick={handleOpenSignatureModal}
+                    className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 underline-offset-2 hover:underline"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    {preferences.clinicianDisplayName ? 'Edit signature' : 'Set signature'}
+                  </button>
+                </div>
                 <SectionCopyButton text={getPatientInstructions()} sectionName="Patient Instructions" />
               </div>
             </CardHeader>
             <CardContent>
+              {signatureNeededMessage && !preferences.clinicianDisplayName && (
+                <div className="mb-4 p-3 rounded-lg border border-amber-500 bg-amber-50 dark:bg-amber-950/20 text-sm text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  <span>Set signature name to generate Patient Instructions.</span>
+                  <button
+                    onClick={handleOpenSignatureModal}
+                    className="ml-auto text-primary underline hover:no-underline text-sm"
+                  >
+                    Set now
+                  </button>
+                </div>
+              )}
               <div className="border rounded-lg p-4 bg-card">
                 <AutoResizeTextarea
                   id="patient-instructions"
@@ -1472,7 +1535,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                   className="min-h-[120px]"
                 />
               </div>
-              {!getPatientInstructions() && (
+              {!getPatientInstructions() && !signatureNeededMessage && (
                 <p className="text-xs text-muted-foreground mt-2">
                   Patient instructions will be generated when you click "Generate SOAP".
                 </p>
@@ -1480,6 +1543,44 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </CardContent>
           </Card>
         )}
+
+        {/* Signature Name Modal */}
+        <Dialog open={showSignatureModal} onOpenChange={setShowSignatureModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Set your letter signature</DialogTitle>
+              <DialogDescription>
+                This name will appear at the end of Patient Instructions letters.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <Label htmlFor="signature-name" className="text-sm font-medium">
+                Signature name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="signature-name"
+                value={pendingSignatureName}
+                onChange={(e) => setPendingSignatureName(e.target.value)}
+                placeholder="Dr. Jane Smith"
+                className="mt-2"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSaveSignature();
+                  }
+                }}
+              />
+            </div>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={handleCancelSignature}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveSignature} disabled={!pendingSignatureName.trim()}>
+                Save
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Transcript Section */}
         <Card>
