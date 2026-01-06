@@ -526,6 +526,58 @@ const AppHome = () => {
               </div>
             )}
 
+            {/* Debug Info Panel */}
+            {(liveScribe.status !== 'idle' || liveScribe.debugInfo.lastLiveError || liveScribe.debugInfo.lastSummaryError) && (
+              <div className="space-y-2 p-3 rounded-lg bg-muted/50 border text-xs font-mono">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">Debug Info</span>
+                  <span className="text-muted-foreground">
+                    Chunks sent: {liveScribe.debugInfo.chunksSent} | Transcript: {liveScribe.debugInfo.totalTranscriptLength} chars
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-muted-foreground">
+                  <div>
+                    <span className="text-foreground">Live API:</span>{' '}
+                    <span className={
+                      liveScribe.debugInfo.lastLiveStatus === 'calling' ? 'text-amber-500' :
+                      liveScribe.debugInfo.lastLiveStatus === 'received' ? 'text-green-500' :
+                      liveScribe.debugInfo.lastLiveStatus === 'error' ? 'text-destructive' :
+                      'text-muted-foreground'
+                    }>
+                      {liveScribe.debugInfo.lastLiveStatus}
+                    </span>
+                    {liveScribe.debugInfo.lastLiveCallAt && (
+                      <span className="ml-2 text-muted-foreground">
+                        @ {new Date(liveScribe.debugInfo.lastLiveCallAt).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                  {docSession.liveDraftMode === 'B' && (
+                    <div>
+                      <span className="text-foreground">Summary API:</span>{' '}
+                      {liveScribe.debugInfo.lastSummaryCallAt ? (
+                        <span className="text-green-500">
+                          called @ {new Date(liveScribe.debugInfo.lastSummaryCallAt).toLocaleTimeString()}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">not called yet</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {liveScribe.debugInfo.lastLiveError && (
+                  <div className="text-destructive bg-destructive/10 p-2 rounded">
+                    <strong>Live Error:</strong> {liveScribe.debugInfo.lastLiveError}
+                  </div>
+                )}
+                {liveScribe.debugInfo.lastSummaryError && (
+                  <div className="text-destructive bg-destructive/10 p-2 rounded">
+                    <strong>Summary Error:</strong> {liveScribe.debugInfo.lastSummaryError}
+                  </div>
+                )}
+              </div>
+            )}
+
             {liveScribe.error && (
               <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
                 {liveScribe.error}
@@ -726,19 +778,29 @@ const AppHome = () => {
               </div>
             </div>
 
-            <Button 
-              onClick={handleGenerateSoap} 
-              disabled={isGeneratingSoap || !docSession.transcriptText} 
-              className="w-full"
-              variant="default"
-            >
-              {isGeneratingSoap ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <FileText className="h-4 w-4 mr-2" />
+            <div className="space-y-2">
+              {docSession.transcriptText && (
+                <div className="text-xs text-muted-foreground flex items-center justify-between">
+                  <span>
+                    Using transcript from: <strong>{liveScribe.status !== 'idle' || liveScribe.transcript ? 'Live' : 'Batch'}</strong>
+                  </span>
+                  <span>{docSession.transcriptText.length} chars</span>
+                </div>
               )}
-              {!docSession.transcriptText ? 'No transcript available' : 'Generate SOAP'}
-            </Button>
+              <Button 
+                onClick={handleGenerateSoap} 
+                disabled={isGeneratingSoap || !docSession.transcriptText} 
+                className="w-full"
+                variant="default"
+              >
+                {isGeneratingSoap ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <FileText className="h-4 w-4 mr-2" />
+                )}
+                {!docSession.transcriptText ? 'No transcript available' : 'Generate SOAP'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 
@@ -866,7 +928,7 @@ const AppHome = () => {
               </pre>
             ) : (
               <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
-                No transcript loaded yet. Run "Start Batch" and "Test Batch Status" first.
+                No transcript loaded yet. Use Live Scribe or run Batch transcription.
               </div>
             )}
           </CardContent>

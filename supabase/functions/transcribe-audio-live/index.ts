@@ -522,11 +522,25 @@ serve(async (req) => {
       console.log(`Job ${jobName} status: ${jobStatus.status} (attempt ${attempt + 1})`);
       
       if (jobStatus.status === 'COMPLETED' && jobStatus.transcriptUri) {
+        console.log(`Fetching transcript from: ${jobStatus.transcriptUri}`);
         const transcriptResponse = await fetch(jobStatus.transcriptUri);
-        const transcriptData = await transcriptResponse.json();
-        const parsed = parseTranscriptWithSpeakers(transcriptData);
-        transcriptText = parsed.text;
-        segments = parsed.segments;
+        const responseText = await transcriptResponse.text();
+        
+        // Check if response is XML (error from S3) instead of JSON
+        if (responseText.startsWith('<?xml') || responseText.startsWith('<')) {
+          console.error('Received XML error response from transcript URI:', responseText.slice(0, 500));
+          throw new Error('Failed to fetch transcript: S3 returned XML error (check bucket permissions or presigned URL)');
+        }
+        
+        try {
+          const transcriptData = JSON.parse(responseText);
+          const parsed = parseTranscriptWithSpeakers(transcriptData);
+          transcriptText = parsed.text;
+          segments = parsed.segments;
+        } catch (parseError) {
+          console.error('Failed to parse transcript JSON:', responseText.slice(0, 500));
+          throw new Error(`Failed to parse transcript: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
+        }
         break;
       } else if (jobStatus.status === 'FAILED') {
         console.error('Medical transcription job failed:', jobStatus.failureReason);
