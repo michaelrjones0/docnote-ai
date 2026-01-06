@@ -7,7 +7,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogOut, ShieldCheck, Play, FileText } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check } from 'lucide-react';
+
+interface SoapData {
+  subjective: string;
+  objective: string;
+  assessment: string;
+  plan: string;
+}
+
+interface SoapResponse {
+  noteType: string;
+  note: string;
+  markdown: string;
+  soap: SoapData;
+  error?: string;
+}
 
 const AppHome = () => {
   const { user, session, isLoading, signOut } = useAuth();
@@ -20,8 +35,9 @@ const AppHome = () => {
   const [jobName, setJobName] = useState('');
   const [startBatchResult, setStartBatchResult] = useState<string | null>(null);
   const [isStartingBatch, setIsStartingBatch] = useState(false);
-  const [soapResult, setSoapResult] = useState<string | null>(null);
+  const [soapResult, setSoapResult] = useState<SoapResponse | null>(null);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -182,16 +198,50 @@ const AppHome = () => {
       });
 
       if (error) {
-        setSoapResult(JSON.stringify({ ok: false, error: error.message }, null, 2));
+        setSoapResult({ error: error.message } as SoapResponse);
       } else {
-        setSoapResult(JSON.stringify(data, null, 2));
+        setSoapResult(data as SoapResponse);
       }
     } catch (err) {
-      setSoapResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
+      setSoapResult({ error: String(err) } as SoapResponse);
     } finally {
       setIsGeneratingSoap(false);
     }
   };
+
+  const copyToClipboard = async (text: string, fieldName: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      toast({
+        title: 'Copied!',
+        description: `${fieldName} copied to clipboard.`,
+      });
+      setTimeout(() => setCopiedField(null), 2000);
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Could not copy to clipboard.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const CopyButton = ({ text, label }: { text: string; label: string }) => (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => copyToClipboard(text, label)}
+      className="flex items-center gap-1"
+    >
+      {copiedField === label ? (
+        <Check className="h-3 w-3" />
+      ) : (
+        <Copy className="h-3 w-3" />
+      )}
+      {label}
+    </Button>
+  );
 
   if (isLoading) {
     return (
@@ -296,9 +346,71 @@ const AppHome = () => {
             </Button>
             
             {soapResult && (
-              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-60">
-                {soapResult}
-              </pre>
+              <div className="text-left space-y-4">
+                {soapResult.error ? (
+                  <div className="bg-destructive/10 border border-destructive/20 p-3 rounded-md text-sm text-destructive">
+                    Error: {soapResult.error}
+                  </div>
+                ) : (
+                  <>
+                    {/* Transcript Section */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-semibold text-sm">Transcript</h4>
+                        <CopyButton text={getTranscriptFromBatchStatus()} label="Copy Transcript" />
+                      </div>
+                      <pre className="bg-muted p-3 rounded-md text-sm overflow-auto max-h-32 whitespace-pre-wrap">
+                        {getTranscriptFromBatchStatus()}
+                      </pre>
+                    </div>
+
+                    {/* SOAP Sections */}
+                    {soapResult.soap && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-semibold text-sm">SOAP Note</h4>
+                          <div className="flex gap-2">
+                            <CopyButton text={soapResult.markdown} label="Copy SOAP (Markdown)" />
+                            <CopyButton text={JSON.stringify(soapResult, null, 2)} label="Copy JSON" />
+                          </div>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <div className="bg-muted/50 p-3 rounded-md">
+                            <h5 className="font-medium text-xs text-muted-foreground mb-1">SUBJECTIVE</h5>
+                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.subjective}</p>
+                          </div>
+                          
+                          <div className="bg-muted/50 p-3 rounded-md">
+                            <h5 className="font-medium text-xs text-muted-foreground mb-1">OBJECTIVE</h5>
+                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.objective}</p>
+                          </div>
+                          
+                          <div className="bg-muted/50 p-3 rounded-md">
+                            <h5 className="font-medium text-xs text-muted-foreground mb-1">ASSESSMENT</h5>
+                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.assessment}</p>
+                          </div>
+                          
+                          <div className="bg-muted/50 p-3 rounded-md">
+                            <h5 className="font-medium text-xs text-muted-foreground mb-1">PLAN</h5>
+                            <p className="text-sm whitespace-pre-wrap">{soapResult.soap.plan}</p>
+                          </div>
+                        </div>
+
+                        {/* Markdown Preview */}
+                        <details className="text-sm">
+                          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                            View Raw Markdown
+                          </summary>
+                          <pre className="mt-2 bg-muted p-3 rounded-md overflow-auto max-h-40 whitespace-pre-wrap">
+                            {soapResult.markdown}
+                          </pre>
+                        </details>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             )}
           </div>
 
