@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -10,9 +10,10 @@ import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio } from 'lucide-react';
 import { useDocNoteSession } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences } from '@/hooks/usePhysicianPreferences';
+import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
 interface SoapData {
@@ -60,6 +61,45 @@ const AppHome = () => {
     getCurrentMarkdown,
     getExportJson,
   } = useDocNoteSession();
+
+  // Live Scribe
+  const liveTranscriptRef = useRef<HTMLPreElement>(null);
+  const liveScribe = useLiveScribe({
+    onTranscriptUpdate: (transcript) => {
+      setTranscriptText(transcript);
+      // Auto-scroll live transcript
+      setTimeout(() => {
+        if (liveTranscriptRef.current) {
+          liveTranscriptRef.current.scrollTop = liveTranscriptRef.current.scrollHeight;
+        }
+      }, 50);
+    },
+    onError: (err) => {
+      toast({
+        title: 'Live Scribe Error',
+        description: err,
+        variant: 'destructive',
+      });
+    },
+    chunkIntervalMs: 10000, // Send chunks every 10 seconds
+  });
+
+  const handleStartLiveScribe = async () => {
+    await liveScribe.startRecording();
+  };
+
+  const handleStopLiveScribe = async () => {
+    const finalTranscript = await liveScribe.stopRecording();
+    
+    // Auto-generate note if we have a transcript
+    if (finalTranscript?.trim()) {
+      setTranscriptText(finalTranscript);
+      // Small delay to ensure state is updated
+      setTimeout(() => {
+        handleGenerateSoap();
+      }, 100);
+    }
+  };
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -361,10 +401,78 @@ const AppHome = () => {
           </Card>
         )}
 
+        {/* Live Scribe Section */}
+        <Card className="border-primary/50">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Radio className="h-5 w-5 text-primary" />
+                Live Scribe (Fast Mode)
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                  liveScribe.status === 'idle' ? 'bg-muted text-muted-foreground' :
+                  liveScribe.status === 'recording' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 animate-pulse' :
+                  liveScribe.status === 'finalizing' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
+                  liveScribe.status === 'done' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                  'bg-red-100 text-red-700'
+                }`}>
+                  {liveScribe.status === 'idle' && 'Idle'}
+                  {liveScribe.status === 'recording' && '● Recording'}
+                  {liveScribe.status === 'finalizing' && 'Finalizing...'}
+                  {liveScribe.status === 'done' && 'Done'}
+                  {liveScribe.status === 'error' && 'Error'}
+                </span>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-3">
+              <Button
+                onClick={handleStartLiveScribe}
+                disabled={liveScribe.status === 'recording' || liveScribe.status === 'finalizing'}
+                variant="default"
+                className="flex-1"
+              >
+                <Mic className="h-4 w-4 mr-2" />
+                Start Live Recording
+              </Button>
+              <Button
+                onClick={handleStopLiveScribe}
+                disabled={liveScribe.status !== 'recording'}
+                variant="destructive"
+                className="flex-1"
+              >
+                <Square className="h-4 w-4 mr-2" />
+                Stop Recording
+              </Button>
+            </div>
+
+            {/* Live Transcript Display */}
+            {(liveScribe.status === 'recording' || liveScribe.transcript) && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Live Transcript</Label>
+                <pre 
+                  ref={liveTranscriptRef}
+                  className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-48 whitespace-pre-wrap font-mono border"
+                >
+                  {liveScribe.transcript || (liveScribe.status === 'recording' ? 'Listening...' : '')}
+                </pre>
+              </div>
+            )}
+
+            {liveScribe.error && (
+              <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
+                {liveScribe.error}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Controls */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Transcription Controls</CardTitle>
+            <CardTitle className="text-lg">Batch Transcription Controls</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
