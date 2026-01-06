@@ -3,56 +3,6 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { getCorsHeaders, getAwsConfig } from "../_shared/env.ts";
 
-// Supported formats for AWS Transcribe Medical
-const SUPPORTED_FORMATS = ['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm'];
-
-function getMediaFormat(mimeType: string): string | null {
-  const mimeToFormat: Record<string, string> = {
-    'audio/webm': 'webm',
-    'audio/webm;codecs=opus': 'webm',
-    'audio/ogg': 'ogg',
-    'audio/ogg;codecs=opus': 'ogg',
-    'audio/mp3': 'mp3',
-    'audio/mpeg': 'mp3',
-    'audio/wav': 'wav',
-    'audio/x-wav': 'wav',
-    'audio/flac': 'flac',
-    'audio/mp4': 'mp4',
-    'audio/amr': 'amr',
-  };
-  return mimeToFormat[mimeType.toLowerCase()] || null;
-}
-
-// Process base64 in chunks to prevent memory issues
-function processBase64Chunks(base64String: string, chunkSize = 32768): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  let position = 0;
-  
-  while (position < base64String.length) {
-    const chunk = base64String.slice(position, position + chunkSize);
-    const binaryChunk = atob(chunk);
-    const bytes = new Uint8Array(binaryChunk.length);
-    
-    for (let i = 0; i < binaryChunk.length; i++) {
-      bytes[i] = binaryChunk.charCodeAt(i);
-    }
-    
-    chunks.push(bytes);
-    position += chunkSize;
-  }
-
-  const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return result;
-}
-
 // AWS Signature V4 helpers
 async function hmacSHA256(key: ArrayBuffer | Uint8Array, message: string): Promise<ArrayBuffer> {
   let keyBuffer: ArrayBuffer;
@@ -164,7 +114,6 @@ async function uploadToS3(
 ): Promise<void> {
   const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
   
-  // Include server-side encryption header
   const headers = await signRequest(
     'PUT',
     url,
@@ -199,6 +148,7 @@ async function startMedicalTranscriptionJob(
   outputBucket: string,
   outputPrefix: string,
   mediaFormat: string,
+  mediaSampleRate: number,
   accessKeyId: string,
   secretAccessKey: string,
   region: string,
@@ -206,7 +156,7 @@ async function startMedicalTranscriptionJob(
 ): Promise<void> {
   const url = `https://transcribe.${region}.amazonaws.com`;
   
-  const requestBody = JSON.stringify({
+  const requestBody: Record<string, unknown> = {
     MedicalTranscriptionJobName: jobName,
     LanguageCode: languageCode,
     MediaFormat: mediaFormat,
@@ -222,7 +172,12 @@ async function startMedicalTranscriptionJob(
       MaxSpeakerLabels: 2,
       ChannelIdentification: false
     }
-  });
+  };
+
+  // Only set MediaSampleRateHertz for PCM - required for raw audio
+  if (mediaFormat === 'wav' || mediaFormat === 'pcm') {
+    requestBody.MediaSampleRateHertz = mediaSampleRate;
+  }
 
   const headers = await signRequest(
     'POST',
@@ -231,7 +186,7 @@ async function startMedicalTranscriptionJob(
       'Content-Type': 'application/x-amz-json-1.1',
       'X-Amz-Target': 'Transcribe.StartMedicalTranscriptionJob'
     },
-    requestBody,
+    JSON.stringify(requestBody),
     'transcribe',
     region,
     accessKeyId,
@@ -241,7 +196,7 @@ async function startMedicalTranscriptionJob(
   const response = await fetch(url, {
     method: 'POST',
     headers,
-    body: requestBody,
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
@@ -330,6 +285,47 @@ async function deleteMedicalTranscriptionJob(
   });
 }
 
+// Create WAV header for PCM data
+function createWavHeader(dataLength: number, sampleRate: number, channels: number, bitsPerSample: number): Uint8Array {
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+  
+  // RIFF header
+  view.setUint8(0, 0x52); // R
+  view.setUint8(1, 0x49); // I
+  view.setUint8(2, 0x46); // F
+  view.setUint8(3, 0x46); // F
+  view.setUint32(4, 36 + dataLength, true); // File size - 8
+  view.setUint8(8, 0x57);  // W
+  view.setUint8(9, 0x41);  // A
+  view.setUint8(10, 0x56); // V
+  view.setUint8(11, 0x45); // E
+  
+  // fmt chunk
+  view.setUint8(12, 0x66); // f
+  view.setUint8(13, 0x6D); // m
+  view.setUint8(14, 0x74); // t
+  view.setUint8(15, 0x20); // (space)
+  view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+  view.setUint16(20, 1, true); // AudioFormat (1 = PCM)
+  view.setUint16(22, channels, true); // NumChannels
+  view.setUint32(24, sampleRate, true); // SampleRate
+  view.setUint32(28, byteRate, true); // ByteRate
+  view.setUint16(32, blockAlign, true); // BlockAlign
+  view.setUint16(34, bitsPerSample, true); // BitsPerSample
+  
+  // data chunk
+  view.setUint8(36, 0x64); // d
+  view.setUint8(37, 0x61); // a
+  view.setUint8(38, 0x74); // t
+  view.setUint8(39, 0x61); // a
+  view.setUint32(40, dataLength, true); // Subchunk2Size
+  
+  return new Uint8Array(header);
+}
+
 interface TranscriptSegment {
   content: string;
   speaker: string;
@@ -337,29 +333,32 @@ interface TranscriptSegment {
   endMs: number;
 }
 
-function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segments: TranscriptSegment[] } {
-  const results = transcriptData.results;
-  const transcriptText = results?.transcripts?.[0]?.transcript || '';
+function parseTranscriptWithSpeakers(transcriptData: Record<string, unknown>): { text: string; segments: TranscriptSegment[] } {
+  const results = transcriptData.results as Record<string, unknown> | undefined;
+  const transcripts = results?.transcripts as Array<{ transcript?: string }> | undefined;
+  const transcriptText = transcripts?.[0]?.transcript || '';
   const segments: TranscriptSegment[] = [];
 
-  const speakerLabels = results?.speaker_labels;
-  const items = results?.items || [];
+  const speakerLabels = results?.speaker_labels as Record<string, unknown> | undefined;
+  const items = (results?.items || []) as Array<Record<string, unknown>>;
 
   if (speakerLabels?.segments) {
-    for (const segment of speakerLabels.segments) {
-      const speaker = segment.speaker_label || 'spk_0';
-      const startMs = Math.round(parseFloat(segment.start_time || '0') * 1000);
-      const endMs = Math.round(parseFloat(segment.end_time || '0') * 1000);
+    const speakerSegments = speakerLabels.segments as Array<Record<string, unknown>>;
+    for (const segment of speakerSegments) {
+      const speaker = (segment.speaker_label as string) || 'spk_0';
+      const startMs = Math.round(parseFloat((segment.start_time as string) || '0') * 1000);
+      const endMs = Math.round(parseFloat((segment.end_time as string) || '0') * 1000);
       
-      const segmentItems = segment.items || [];
+      const segmentItems = (segment.items || []) as Array<Record<string, unknown>>;
       const words: string[] = [];
       
       for (const item of segmentItems) {
-        const contentItem = items.find((ci: any) => 
+        const contentItem = items.find((ci) => 
           ci.start_time === item.start_time && ci.end_time === item.end_time
         );
-        if (contentItem?.alternatives?.[0]?.content) {
-          words.push(contentItem.alternatives[0].content);
+        const alternatives = contentItem?.alternatives as Array<{ content?: string }> | undefined;
+        if (alternatives?.[0]?.content) {
+          words.push(alternatives[0].content);
         }
       }
       
@@ -377,9 +376,10 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
     
     for (const item of items) {
       if (item.type === 'pronunciation') {
-        const word = item.alternatives?.[0]?.content || '';
-        const startMs = Math.round(parseFloat(item.start_time || '0') * 1000);
-        const endMs = Math.round(parseFloat(item.end_time || '0') * 1000);
+        const alternatives = item.alternatives as Array<{ content?: string }> | undefined;
+        const word = alternatives?.[0]?.content || '';
+        const startMs = Math.round(parseFloat((item.start_time as string) || '0') * 1000);
+        const endMs = Math.round(parseFloat((item.end_time as string) || '0') * 1000);
         
         if (!currentSegment) {
           currentSegment = { words: [word], startMs, endMs };
@@ -396,9 +396,10 @@ function parseTranscriptWithSpeakers(transcriptData: any): { text: string; segme
           currentSegment.endMs = endMs;
         }
       } else if (item.type === 'punctuation' && currentSegment) {
+        const alternatives = item.alternatives as Array<{ content?: string }> | undefined;
         const lastWord = currentSegment.words.pop();
         if (lastWord) {
-          currentSegment.words.push(lastWord + (item.alternatives?.[0]?.content || ''));
+          currentSegment.words.push(lastWord + (alternatives?.[0]?.content || ''));
         }
       }
     }
@@ -446,6 +447,40 @@ async function verifyJWT(req: Request): Promise<{ userId: string } | null> {
   return { userId: user.id };
 }
 
+// Fetch transcript with signed URL (handles S3 output bucket permissions)
+async function fetchTranscriptFromS3(
+  bucket: string,
+  key: string,
+  accessKeyId: string,
+  secretAccessKey: string,
+  region: string
+): Promise<string> {
+  const url = `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+  
+  const headers = await signRequest(
+    'GET',
+    url,
+    {},
+    '',
+    's3',
+    region,
+    accessKeyId,
+    secretAccessKey
+  );
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`S3 fetch failed: ${response.status} - ${errorText}`);
+  }
+
+  return response.text();
+}
+
 serve(async (req) => {
   const origin = req.headers.get('Origin');
   const corsHeaders = getCorsHeaders(origin);
@@ -464,48 +499,57 @@ serve(async (req) => {
   }
 
   try {
-    const { audio, languageCode = 'en-US', chunkIndex, mimeType = 'audio/webm' } = await req.json();
+    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex } = await req.json();
     
     if (!audio) {
       throw new Error('No audio data provided');
     }
 
-    // Validate audio format
-    const mediaFormat = getMediaFormat(mimeType);
-    if (!mediaFormat) {
-      return new Response(
-        JSON.stringify({ 
-          error: `Unsupported audio format: ${mimeType}. Supported formats: ${SUPPORTED_FORMATS.join(', ')}`,
-          receivedFormat: mimeType,
-          supportedFormats: SUPPORTED_FORMATS
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     // Get validated AWS configuration
     const awsConfig = getAwsConfig();
 
-    console.log(`[${authResult.userId}] Processing live audio chunk ${chunkIndex ?? 'N/A'} (${mimeType}) with AWS Transcribe Medical...`);
+    console.log(`[${authResult.userId}] Processing live audio chunk ${chunkIndex ?? 'N/A'}, encoding: ${encoding}, sampleRate: ${sampleRate}...`);
 
-    const binaryAudio = processBase64Chunks(audio);
-    
+    // Decode base64 audio
+    const binaryString = atob(audio);
+    const pcmData = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      pcmData[i] = binaryString.charCodeAt(i);
+    }
+
+    console.log(`Received ${pcmData.length} bytes of PCM data`);
+
+    // Create WAV file from PCM data
+    const wavHeader = createWavHeader(pcmData.length, sampleRate, 1, 16);
+    const wavData = new Uint8Array(wavHeader.length + pcmData.length);
+    wavData.set(wavHeader, 0);
+    wavData.set(pcmData, wavHeader.length);
+
+    console.log(`Created WAV file: ${wavData.length} bytes (header: ${wavHeader.length}, data: ${pcmData.length})`);
+
     const timestamp = Date.now();
     const chunkId = crypto.randomUUID().slice(0, 8);
     const jobName = `medical-live-${timestamp}-${chunkId}`;
-    const fileExtension = mediaFormat;
-    const s3Key = `${awsConfig.s3Prefix}live/${jobName}.${fileExtension}`;
+    const s3Key = `${awsConfig.s3Prefix}live/${jobName}.wav`;
 
-    console.log('Uploading chunk to S3 with encryption...');
+    console.log('Uploading WAV to S3...');
     await uploadToS3(
-      binaryAudio, awsConfig.s3Bucket, s3Key, mimeType,
+      wavData, awsConfig.s3Bucket, s3Key, 'audio/wav',
       awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
     );
 
     console.log('Starting medical transcription job:', jobName);
     await startMedicalTranscriptionJob(
-      jobName, `s3://${awsConfig.s3Bucket}/${s3Key}`, awsConfig.s3Bucket, awsConfig.s3Prefix, mediaFormat,
-      awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region, languageCode
+      jobName, 
+      `s3://${awsConfig.s3Bucket}/${s3Key}`, 
+      awsConfig.s3Bucket, 
+      awsConfig.s3Prefix, 
+      'wav',
+      sampleRate,
+      awsConfig.accessKeyId, 
+      awsConfig.secretAccessKey, 
+      awsConfig.region, 
+      languageCode
     );
 
     const maxAttempts = 60;
@@ -521,25 +565,27 @@ serve(async (req) => {
       
       console.log(`Job ${jobName} status: ${jobStatus.status} (attempt ${attempt + 1})`);
       
-      if (jobStatus.status === 'COMPLETED' && jobStatus.transcriptUri) {
-        console.log(`Fetching transcript from: ${jobStatus.transcriptUri}`);
-        const transcriptResponse = await fetch(jobStatus.transcriptUri);
-        const responseText = await transcriptResponse.text();
-        
-        // Check if response is XML (error from S3) instead of JSON
-        if (responseText.startsWith('<?xml') || responseText.startsWith('<')) {
-          console.error('Received XML error response from transcript URI:', responseText.slice(0, 500));
-          throw new Error('Failed to fetch transcript: S3 returned XML error (check bucket permissions or presigned URL)');
-        }
+      if (jobStatus.status === 'COMPLETED') {
+        // Fetch transcript using signed S3 request instead of presigned URL
+        const outputKey = `${awsConfig.s3Prefix}live-output/${jobName}.json`;
+        console.log(`Fetching transcript from S3: ${outputKey}`);
         
         try {
+          const responseText = await fetchTranscriptFromS3(
+            awsConfig.s3Bucket,
+            outputKey,
+            awsConfig.accessKeyId,
+            awsConfig.secretAccessKey,
+            awsConfig.region
+          );
+          
           const transcriptData = JSON.parse(responseText);
           const parsed = parseTranscriptWithSpeakers(transcriptData);
           transcriptText = parsed.text;
           segments = parsed.segments;
-        } catch (parseError) {
-          console.error('Failed to parse transcript JSON:', responseText.slice(0, 500));
-          throw new Error(`Failed to parse transcript: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`);
+        } catch (fetchError) {
+          console.error('Failed to fetch transcript from S3:', fetchError);
+          throw new Error(`Failed to fetch transcript: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
         }
         break;
       } else if (jobStatus.status === 'FAILED') {
@@ -554,7 +600,7 @@ serve(async (req) => {
       console.warn('Cleanup warning:', cleanupError);
     }
 
-    console.log(`Live medical transcription completed: ${transcriptText.slice(0, 100)}, ${segments.length} segments`);
+    console.log(`Live transcription completed: "${transcriptText.slice(0, 100)}", ${segments.length} segments`);
 
     return new Response(
       JSON.stringify({ 
