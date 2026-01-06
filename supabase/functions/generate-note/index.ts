@@ -1,10 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { getCorsHeaders } from "../_shared/env.ts";
 
 // Dev mode check - include detailed errors in response when not in production
 const isDevMode = () => {
@@ -17,6 +13,7 @@ const isDevMode = () => {
 const buildErrorResponse = (
   genericMessage: string,
   status: number,
+  corsHeaders: Record<string, string>,
   devDetails?: { message?: string; stack?: string; details?: string }
 ) => {
   const isDev = isDevMode();
@@ -385,8 +382,20 @@ ${preferenceInstructions}
 };
 
 serve(async (req) => {
+  const origin = req.headers.get('Origin');
+  const { headers: corsHeaders, isAllowed } = getCorsHeaders(origin);
+
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // Block disallowed origins
+  if (!isAllowed) {
+    return new Response(
+      JSON.stringify({ error: 'Origin not allowed' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -416,6 +425,7 @@ serve(async (req) => {
       return buildErrorResponse(
         'AI API key not configured',
         500,
+        corsHeaders,
         { message: 'OPENAI_API_KEY is missing from environment variables' }
       );
     }
@@ -520,6 +530,7 @@ Remember:
           return buildErrorResponse(
             'Rate limit exceeded. Please try again later.',
             429,
+            corsHeaders,
             { details: errorText }
           );
         }
@@ -527,6 +538,7 @@ Remember:
           return buildErrorResponse(
             'AI authentication failed',
             500,
+            corsHeaders,
             { message: 'OpenAI API key is invalid', details: errorText }
           );
         }
@@ -534,12 +546,14 @@ Remember:
           return buildErrorResponse(
             'AI quota exceeded or access denied',
             402,
+            corsHeaders,
             { details: errorText }
           );
         }
         return buildErrorResponse(
           'Failed to generate note',
           500,
+          corsHeaders,
           { message: `OpenAI API error: ${response.status}`, details: errorText }
         );
       }
@@ -557,6 +571,7 @@ Remember:
         return buildErrorResponse(
           'No content generated',
           500,
+          corsHeaders,
           { message: 'OpenAI returned empty response' }
         );
       }
@@ -583,6 +598,7 @@ Remember:
         return buildErrorResponse(
           'Failed to parse structured response from AI',
           500,
+          corsHeaders,
           { message: 'The AI did not return valid JSON', details: rawContent.slice(0, 500) }
         );
       }
@@ -601,6 +617,7 @@ Remember:
           return buildErrorResponse(
             'Invalid note structure from AI',
             500,
+            corsHeaders,
             { 
               message: 'Missing or invalid fields (subjective, objective, assessment, plan)',
               details: JSON.stringify(parsed).slice(0, 500)
@@ -637,6 +654,7 @@ Remember:
         return buildErrorResponse(
           'Invalid note structure from AI',
           500,
+          corsHeaders,
           { 
             message: 'Missing or invalid fields (subjective, objective, assessmentPlan)',
             details: JSON.stringify(parsed).slice(0, 500)
@@ -791,6 +809,7 @@ Please generate the ${noteType} note now, written from my perspective as the cli
         return buildErrorResponse(
           'Rate limit exceeded. Please try again later.',
           429,
+          corsHeaders,
           { details: errorText }
         );
       }
@@ -798,12 +817,14 @@ Please generate the ${noteType} note now, written from my perspective as the cli
         return buildErrorResponse(
           'AI authentication failed',
           500,
+          corsHeaders,
           { message: 'OpenAI API key is invalid', details: errorText }
         );
       }
       return buildErrorResponse(
         'Failed to generate note',
         500,
+        corsHeaders,
         { message: `OpenAI API error: ${response.status}`, details: errorText }
       );
     }
@@ -820,6 +841,7 @@ Please generate the ${noteType} note now, written from my perspective as the cli
       return buildErrorResponse(
         'No content generated',
         500,
+        corsHeaders,
         { message: 'OpenAI returned empty response' }
       );
     }
@@ -839,9 +861,13 @@ Please generate the ${noteType} note now, written from my perspective as the cli
       stack: error instanceof Error ? error.stack : undefined,
       error,
     });
+    // Re-derive CORS for catch block (origin may not be available if parsing failed early)
+    const origin = req.headers.get('Origin');
+    const { headers: catchCorsHeaders } = getCorsHeaders(origin);
     return buildErrorResponse(
       'An unexpected error occurred',
       500,
+      catchCorsHeaders,
       {
         message: error instanceof Error ? error.message : 'Unknown server error',
         stack: error instanceof Error ? error.stack : undefined,
