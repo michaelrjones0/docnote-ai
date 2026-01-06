@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { LiveDraftMode } from './useDocNoteSession';
 
-export type LiveScribeStatus = 'idle' | 'recording' | 'finalizing' | 'done' | 'error';
+export type LiveScribeStatus = 'idle' | 'recording' | 'paused' | 'finalizing' | 'done' | 'error';
 
 interface TranscriptSegment {
   content: string;
@@ -26,6 +26,18 @@ export interface LiveScribeDebugInfo {
   bytesPerChunk: number | null;
   encoding: string;
   chunksWithNoTranscript: number;
+}
+
+// Encounter snapshot for future persistence/switching
+export interface EncounterSnapshot {
+  encounterId: string;
+  status: LiveScribeStatus;
+  elapsedMs: number;
+  transcriptText: string;
+  segmentsMeta: TranscriptSegment[];
+  runningSummary: string | null;
+  preferencesUsed: object;
+  lastUpdatedAt: string;
 }
 
 interface UseLiveScribeOptions {
@@ -58,10 +70,14 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const [runningSummary, setRunningSummary] = useState<string | null>(null);
   
-  // Recording timer state
+  // Recording timer state - tracks ACTIVE recording time only (excludes paused time)
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
-  const recordingStartMsRef = useRef<number | null>(null);
+  const elapsedBeforePauseRef = useRef(0); // Accumulated time before pause
+  const lastTickMsRef = useRef<number | null>(null); // When we last ticked the timer
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Encounter ID for future encounter switching
+  const encounterIdRef = useRef<string>(crypto.randomUUID());
   
   // Debug state
   const [debugInfo, setDebugInfo] = useState<LiveScribeDebugInfo>({
@@ -479,11 +495,15 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       }
 
       // Start the recording timer
-      recordingStartMsRef.current = Date.now();
+      elapsedBeforePauseRef.current = 0;
+      lastTickMsRef.current = Date.now();
       setRecordingElapsedMs(0);
       timerIntervalRef.current = setInterval(() => {
-        if (recordingStartMsRef.current) {
-          setRecordingElapsedMs(Date.now() - recordingStartMsRef.current);
+        if (lastTickMsRef.current !== null) {
+          const now = Date.now();
+          const delta = now - lastTickMsRef.current;
+          lastTickMsRef.current = now;
+          setRecordingElapsedMs(prev => prev + delta);
         }
       }, 250);
 
@@ -503,7 +523,13 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   }, [chunkIntervalMs, sendCurrentChunks, onError, liveDraftMode, updateRunningSummary]);
 
   const stopRecording = useCallback(async (): Promise<string> => {
-    console.log('[LiveScribe] Stopping recording...');
+    // Can stop from recording or paused state
+    if (status !== 'recording' && status !== 'paused') {
+      console.log('[LiveScribe] Cannot stop - not recording or paused, status:', status);
+      return accumulatedTranscriptRef.current;
+    }
+    
+    console.log('[LiveScribe] Stopping recording from status:', status);
     setStatus('finalizing');
 
     // Stop the recording timer (freeze elapsed time)
@@ -570,7 +596,173 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     console.log('[LiveScribe] Recording stopped, transcript length:', finalTranscript.length);
 
     return finalTranscript;
-  }, [sendCurrentChunks, liveDraftMode, updateRunningSummary]);
+  }, [status, sendCurrentChunks, liveDraftMode, updateRunningSummary]);
+
+  // Pause recording: stop audio capture but preserve state
+  const pauseRecording = useCallback(() => {
+    if (status !== 'recording') {
+      console.log('[LiveScribe] Cannot pause - not recording, status:', status);
+      return;
+    }
+    
+    console.log('[LiveScribe] Pausing recording...');
+    
+    // Stop timer (freeze elapsed time)
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    // Store current elapsed time for resume
+    elapsedBeforePauseRef.current = recordingElapsedMs;
+    lastTickMsRef.current = null;
+    
+    // Stop audio processing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    
+    // Stop summary updates (Option B)
+    if (summaryIntervalRef.current) {
+      clearInterval(summaryIntervalRef.current);
+      summaryIntervalRef.current = null;
+    }
+    
+    // Disconnect audio nodes (stop capturing) but keep refs for resume
+    if (processorNodeRef.current) {
+      processorNodeRef.current.disconnect();
+      processorNodeRef.current = null;
+    }
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    
+    // Stop media stream tracks
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    
+    // Clear PCM buffer (already sent chunks are fine)
+    pcmBufferRef.current = [];
+    
+    setStatus('paused');
+    console.log('[LiveScribe] Recording paused, elapsed:', recordingElapsedMs, 'ms');
+  }, [status, recordingElapsedMs]);
+
+  // Resume recording: restart audio capture, continue appending to transcript
+  const resumeRecording = useCallback(async () => {
+    if (status !== 'paused') {
+      console.log('[LiveScribe] Cannot resume - not paused, status:', status);
+      return;
+    }
+    
+    console.log('[LiveScribe] Resuming recording...');
+    
+    try {
+      // Re-acquire microphone
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      
+      streamRef.current = stream;
+      
+      // Create new audio context
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      
+      const inputSampleRate = audioContext.sampleRate;
+      console.log(`[LiveScribe] Resume - Audio context sample rate: ${inputSampleRate} Hz`);
+      
+      setDebugInfo(prev => ({
+        ...prev,
+        inputSampleRate,
+      }));
+      
+      // Create source node from stream
+      const sourceNode = audioContext.createMediaStreamSource(stream);
+      sourceNodeRef.current = sourceNode;
+      
+      // Create script processor for capturing PCM data
+      const processorNode = audioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
+      processorNodeRef.current = processorNode;
+      
+      processorNode.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcmData = new Float32Array(inputData.length);
+        pcmData.set(inputData);
+        pcmBufferRef.current.push(pcmData);
+      };
+      
+      // Connect nodes
+      sourceNode.connect(processorNode);
+      processorNode.connect(audioContext.destination);
+      
+      // Restart audio processing interval
+      intervalRef.current = setInterval(() => {
+        sendCurrentChunks();
+      }, chunkIntervalMs);
+      
+      // Restart summary interval for Option B
+      if (liveDraftMode === 'B') {
+        console.log('[LiveScribe] Resume - Restarting summary interval');
+        summaryIntervalRef.current = setInterval(() => {
+          if (accumulatedTranscriptRef.current.length > lastSummaryTranscriptLengthRef.current + 50) {
+            updateRunningSummary();
+          }
+        }, 75000);
+        
+        // Optional: trigger immediate summary update on resume
+        if (accumulatedTranscriptRef.current.length > lastSummaryTranscriptLengthRef.current + 50) {
+          updateRunningSummary();
+        }
+      }
+      
+      // Resume timer from where we left off
+      lastTickMsRef.current = Date.now();
+      timerIntervalRef.current = setInterval(() => {
+        if (lastTickMsRef.current !== null) {
+          const now = Date.now();
+          const delta = now - lastTickMsRef.current;
+          lastTickMsRef.current = now;
+          setRecordingElapsedMs(prev => prev + delta);
+        }
+      }, 250);
+      
+      setStatus('recording');
+      console.log('[LiveScribe] Recording resumed, continuing from elapsed:', recordingElapsedMs, 'ms');
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Failed to resume microphone access';
+      console.error('[LiveScribe] Resume failed:', err);
+      setError(errMsg);
+      // Stay in paused state rather than erroring out completely
+      onError?.(errMsg);
+    }
+  }, [status, recordingElapsedMs, chunkIntervalMs, sendCurrentChunks, liveDraftMode, updateRunningSummary, onError]);
+
+  // Get current encounter snapshot (for future persistence)
+  const getEncounterSnapshot = useCallback((): EncounterSnapshot => {
+    return {
+      encounterId: encounterIdRef.current,
+      status,
+      elapsedMs: recordingElapsedMs,
+      transcriptText: accumulatedTranscriptRef.current,
+      segmentsMeta: segments,
+      runningSummary: currentRunningSummaryRef.current,
+      preferencesUsed: preferences,
+      lastUpdatedAt: new Date().toISOString(),
+    };
+  }, [status, recordingElapsedMs, segments, preferences]);
 
   const reset = useCallback(() => {
     // Clear timer
@@ -578,8 +770,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
     }
-    recordingStartMsRef.current = null;
+    elapsedBeforePauseRef.current = 0;
+    lastTickMsRef.current = null;
     setRecordingElapsedMs(0);
+    
+    // Generate new encounter ID for next session
+    encounterIdRef.current = crypto.randomUUID();
 
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -641,8 +837,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     runningSummary,
     debugInfo,
     recordingElapsedMs,
+    encounterId: encounterIdRef.current,
     startRecording,
+    pauseRecording,
+    resumeRecording,
     stopRecording,
     reset,
+    getEncounterSnapshot,
   };
 }
