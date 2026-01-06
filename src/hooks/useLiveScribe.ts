@@ -3,6 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import type { LiveDraftMode } from './useDocNoteSession';
 import { debugLog, debugLogPHI, safeLog, safeWarn, safeErrorLog } from '@/lib/debug';
 
+// Check if error is auth-related (401, expired token, etc.)
+const isAuthError = (error: unknown): boolean => {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /unauthorized|401|invalid.*token|expired|not authenticated/i.test(msg);
+};
+
 export type LiveScribeStatus = 'idle' | 'recording' | 'paused' | 'finalizing' | 'done' | 'error';
 
 interface TranscriptSegment {

@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { safeErrorLog } from '@/lib/debug';
+
+// Check if error is auth-related (401, expired token, etc.)
+const isAuthError = (error: unknown): boolean => {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /unauthorized|401|invalid.*token|expired|not authenticated/i.test(msg);
+};
 
 interface PreviousVisit {
   id: string;
@@ -144,7 +151,10 @@ export function usePreviousVisits(patientId: string | null) {
         hasRelevantHistory: data?.hasRelevantHistory || false,
       });
     } catch (err) {
-      console.error('Error fetching AI context:', err);
+      safeErrorLog('[PreviousVisits] Error fetching AI context', err);
+      if (isAuthError(err)) {
+        setError('Session expired. Please sign in again.');
+      }
     } finally {
       setIsLoadingContext(false);
     }
@@ -178,8 +188,12 @@ export function usePreviousVisits(patientId: string | null) {
         hasRelevantHistory: data?.hasRelevantHistory || false,
       });
     } catch (err) {
-      console.error('Error searching context:', err);
-      setError('Failed to search patient context');
+      safeErrorLog('[PreviousVisits] Error searching context', err);
+      if (isAuthError(err)) {
+        setError('Session expired. Please sign in again.');
+      } else {
+        setError('Failed to search patient context');
+      }
     } finally {
       setIsLoadingContext(false);
     }
