@@ -444,29 +444,6 @@ const AppHome = () => {
           </CardContent>
         </Card>
 
-        {/* Transcript Section */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Transcript</CardTitle>
-              {docSession.transcriptText && (
-                <CopyButton text={docSession.transcriptText} label="Copy Transcript" />
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {docSession.transcriptText ? (
-              <pre className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-64 whitespace-pre-wrap font-mono border">
-                {docSession.transcriptText}
-              </pre>
-            ) : (
-              <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
-                No transcript loaded yet. Run "Start Batch" and "Test Batch Status" first.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
         {/* SOAP Note Section */}
         <Card>
           <CardHeader className="pb-3">
@@ -572,7 +549,30 @@ const AppHome = () => {
               </div>
             )}
           </CardContent>
-          </Card>
+        </Card>
+
+        {/* Transcript Section */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Transcript</CardTitle>
+              {docSession.transcriptText && (
+                <CopyButton text={docSession.transcriptText} label="Copy Transcript" />
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {docSession.transcriptText ? (
+              <pre className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-64 whitespace-pre-wrap font-mono border">
+                {docSession.transcriptText}
+              </pre>
+            ) : (
+              <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
+                No transcript loaded yet. Run "Start Batch" and "Test Batch Status" first.
+              </div>
+            )}
+          </CardContent>
+        </Card>
         </div>
       </div>
     </DemoModeGuard>
