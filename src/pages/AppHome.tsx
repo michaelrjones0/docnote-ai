@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
+import { DictationTextarea } from '@/components/ui/dictation-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
@@ -1353,62 +1354,46 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {/* Editable SOAP Cards - 4 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Subjective
-                      </Label>
-                      <SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap-subjective"
+                    <DictationTextarea
+                      fieldId="soap-subjective"
+                      label="Subjective"
                       value={currentSoap.subjective || ''}
                       onChange={(e) => editSoapField('subjective', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Objective
-                      </Label>
-                      <SectionCopyButton text={currentSoap.objective || ''} sectionName="Objective" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap-objective"
+                    <DictationTextarea
+                      fieldId="soap-objective"
+                      label="Objective"
                       value={currentSoap.objective || ''}
                       onChange={(e) => editSoapField('objective', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap.objective || ''} sectionName="Objective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Assessment
-                      </Label>
-                      <SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap-assessment"
+                    <DictationTextarea
+                      fieldId="soap-assessment"
+                      label="Assessment"
                       value={currentSoap.assessment || ''}
                       onChange={(e) => editSoapField('assessment', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Plan
-                      </Label>
-                      <SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap-plan"
+                    <DictationTextarea
+                      fieldId="soap-plan"
+                      label="Plan"
                       value={currentSoap.plan || ''}
                       onChange={(e) => editSoapField('plan', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />}
                     />
                   </div>
                 </div>
@@ -1447,47 +1432,35 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {/* Editable SOAP Cards - 3 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap3-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Subjective
-                      </Label>
-                      <SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap3-subjective"
+                    <DictationTextarea
+                      fieldId="soap3-subjective"
+                      label="Subjective"
                       value={currentSoap3.subjective || ''}
                       onChange={(e) => editSoap3Field('subjective', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap3-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Objective
-                      </Label>
-                      <SectionCopyButton text={currentSoap3.objective || ''} sectionName="Objective" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap3-objective"
+                    <DictationTextarea
+                      fieldId="soap3-objective"
+                      label="Objective"
                       value={currentSoap3.objective || ''}
                       onChange={(e) => editSoap3Field('objective', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap3.objective || ''} sectionName="Objective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap3-assessmentPlan" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Assessment & Plan
-                      </Label>
-                      <SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />
-                    </div>
-                    <AutoResizeTextarea
-                      id="soap3-assessmentPlan"
+                    <DictationTextarea
+                      fieldId="soap3-assessmentPlan"
+                      label="Assessment & Plan"
                       value={currentSoap3.assessmentPlan || ''}
                       onChange={(e) => editSoap3Field('assessmentPlan', e.target.value)}
                       placeholder="Not documented."
+                      copyButton={<SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />}
                     />
                   </div>
                 </div>
@@ -1553,18 +1526,15 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
         {hasNote && (
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <CardTitle className="text-lg">Patient Instructions</CardTitle>
-                  <button
-                    onClick={handleOpenSignatureModal}
-                    className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 underline-offset-2 hover:underline"
-                  >
-                    <Pencil className="h-3 w-3" />
-                    {preferences.clinicianDisplayName ? 'Edit signature' : 'Set signature'}
-                  </button>
-                </div>
-                <SectionCopyButton text={getPatientInstructions()} sectionName="Patient Instructions" />
+              <div className="flex items-center gap-3">
+                <CardTitle className="text-lg">Patient Instructions</CardTitle>
+                <button
+                  onClick={handleOpenSignatureModal}
+                  className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 underline-offset-2 hover:underline"
+                >
+                  <Pencil className="h-3 w-3" />
+                  {preferences.clinicianDisplayName ? 'Edit signature' : 'Set signature'}
+                </button>
               </div>
             </CardHeader>
             <CardContent>
@@ -1581,12 +1551,14 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 </div>
               )}
               <div className="border rounded-lg p-4 bg-card">
-                <AutoResizeTextarea
-                  id="patient-instructions"
+                <DictationTextarea
+                  fieldId="patient-instructions"
+                  label="Patient Instructions"
                   value={getPatientInstructions()}
                   onChange={(e) => editPatientInstructions(e.target.value)}
                   placeholder="Patient instructions will be generated here. This is a plain-language letter summarizing the visit for the patient."
                   className="min-h-[120px]"
+                  copyButton={<SectionCopyButton text={getPatientInstructions()} sectionName="Patient Instructions" />}
                 />
               </div>
               {!getPatientInstructions() && !signatureNeededMessage && (
