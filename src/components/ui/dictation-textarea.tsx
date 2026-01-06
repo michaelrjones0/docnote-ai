@@ -64,6 +64,7 @@ export const DictationTextarea = React.forwardRef<HTMLTextAreaElement, Dictation
         setSelectionStart: (pos: number) => {
           cursorPositionRef.current = pos;
         },
+        getTextareaEl: () => textareaRef.current,
       };
 
       registerField(registration);

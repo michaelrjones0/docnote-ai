@@ -34,7 +34,7 @@ interface UseGlobalDictationOptions {
 }
 
 export function useGlobalDictation({
-  chunkIntervalMs = 3000,
+  chunkIntervalMs = 1200,
   onError,
   onNoFieldFocused,
 }: UseGlobalDictationOptions = {}) {
@@ -72,7 +72,9 @@ export function useGlobalDictation({
     
     const activeField = getActiveField();
     if (!activeField) {
-      safeLog('[GlobalDictation] No active field, skipping chunk');
+      // Clear chunks to prevent dumping into next field later
+      chunksRef.current = [];
+      safeLog('[GlobalDictation] No active field, clearing chunks');
       onNoFieldFocused?.();
       return;
     }

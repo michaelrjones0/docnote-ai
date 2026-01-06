@@ -23,6 +23,7 @@ export interface FieldRegistration {
   setValue: (value: string) => void;
   getSelectionStart: () => number | null;
   setSelectionStart: (pos: number) => void;
+  getTextareaEl: () => HTMLTextAreaElement | null;
 }
 
 interface DictationContextValue {
@@ -117,6 +118,15 @@ export function DictationProvider({ children }: { children: React.ReactNode }) {
     // Update cursor position for next insertion
     const newCursorPos = insertPosition + formattedText.length;
     field.setSelectionStart(newCursorPos);
+
+    // Move DOM cursor to end of inserted text after React updates
+    const el = field.getTextareaEl();
+    if (el) {
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(newCursorPos, newCursorPos);
+      });
+    }
 
     return true;
   }, [getActiveField]);
