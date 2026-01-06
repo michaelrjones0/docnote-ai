@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { LiveDraftMode } from './useDocNoteSession';
+import { debugLog, debugLogPHI, safeLog, safeWarn, safeErrorLog } from '@/lib/debug';
 
 export type LiveScribeStatus = 'idle' | 'recording' | 'paused' | 'finalizing' | 'done' | 'error';
 
@@ -179,7 +180,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         
         // Retry on 5xx, 429, or network errors
         if (response.status >= 500 || response.status === 429) {
-          console.warn(`[LiveScribe] Retry attempt ${attempt + 1}/${maxRetries} after ${response.status}`);
+          safeWarn(`[LiveScribe] Retry attempt ${attempt + 1}/${maxRetries} after ${response.status}`);
           lastError = new Error(`HTTP ${response.status}`);
           
           if (attempt < maxRetries - 1) {
@@ -198,7 +199,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         }
         
         lastError = err instanceof Error ? err : new Error('Network error');
-        console.warn(`[LiveScribe] Retry attempt ${attempt + 1}/${maxRetries} after network error:`, err);
+        safeWarn(`[LiveScribe] Retry attempt ${attempt + 1}/${maxRetries} after network error`);
         
         if (attempt < maxRetries - 1) {
           const delay = Math.pow(2, attempt) * 1000;
@@ -234,7 +235,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       }
       const base64Audio = btoa(binary);
 
-      console.log(`[LiveScribe] Sending PCM chunk ${chunkIndex}, samples: ${pcmData.length}, bytes: ${byteLength}`);
+      safeLog(`[LiveScribe] Sending PCM chunk ${chunkIndex}, samples: ${pcmData.length}, bytes: ${byteLength}`);
 
       const { data: sessionData } = await supabase.auth.getSession();
       const accessToken = sessionData?.session?.access_token;
@@ -274,7 +275,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       }
 
       const result = await response.json();
-      console.log(`[LiveScribe] Chunk ${chunkIndex} transcribed:`, result.text?.slice(0, 100));
+      debugLogPHI(`[LiveScribe] Chunk ${chunkIndex} transcribed:`, result.text, 100);
       
       setDebugInfo(prev => ({
         ...prev,
@@ -287,12 +288,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     } catch (err) {
       // Handle abort gracefully
       if (err instanceof DOMException && err.name === 'AbortError') {
-        console.log(`[LiveScribe] Chunk ${chunkIndex} request aborted (paused)`);
+        safeLog(`[LiveScribe] Chunk ${chunkIndex} request aborted (paused)`);
         return null;
       }
       
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error(`[LiveScribe] Error processing chunk ${chunkIndex}:`, err);
+      safeErrorLog(`[LiveScribe] Error processing chunk ${chunkIndex}:`, err);
       
       setDebugInfo(prev => ({
         ...prev,
@@ -327,12 +328,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       
       // Skip if too short (less than 0.5 seconds of audio)
       if (pcm16.length < TARGET_SAMPLE_RATE * 0.5) {
-        console.log('[LiveScribe] Chunk too short, skipping');
+        debugLog('[LiveScribe] Chunk too short, skipping');
         isProcessingRef.current = false;
         return;
       }
 
-      console.log(`[LiveScribe] Processing chunk ${currentIndex}, ${pcm16.length} samples (${(pcm16.length / TARGET_SAMPLE_RATE).toFixed(1)}s)`);
+      safeLog(`[LiveScribe] Processing chunk ${currentIndex}, ${pcm16.length} samples (${(pcm16.length / TARGET_SAMPLE_RATE).toFixed(1)}s)`);
 
       const result = await processAudioChunk(pcm16, currentIndex);
       
@@ -376,13 +377,13 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     } catch (err) {
       // Handle aborts gracefully - don't surface as error
       if (err instanceof DOMException && err.name === 'AbortError') {
-        console.log('[LiveScribe] Chunk processing aborted');
+        safeLog('[LiveScribe] Chunk processing aborted');
         isProcessingRef.current = false;
         return;
       }
       
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[LiveScribe] Chunk processing failed:', errMsg);
+      safeErrorLog('[LiveScribe] Chunk processing failed:', err);
       
       // Surface as warning, not error - keep recording locally
       setDebugInfo(prev => ({
@@ -392,7 +393,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       
       // Only surface to onError if it's a persistent failure
       // Don't block recording for transient network issues
-      console.warn('[LiveScribe] Continuing recording despite chunk upload failure');
+      safeWarn('[LiveScribe] Continuing recording despite chunk upload failure');
     } finally {
       isProcessingRef.current = false;
     }
@@ -405,7 +406,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     
     // Skip if no meaningful delta (at least 50 chars of new content)
     if (!transcriptDelta.trim() || transcriptDelta.trim().length < 50) {
-      console.log('[LiveScribe] No meaningful transcript delta for summary, skipping. Delta length:', transcriptDelta.length);
+      debugLog('[LiveScribe] No meaningful transcript delta for summary, skipping. Delta length:', transcriptDelta.length);
       return;
     }
 
@@ -417,7 +418,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     }));
 
     try {
-      console.log('[LiveScribe] Updating running summary, delta length:', transcriptDelta.length, 'retry:', retryCount);
+      safeLog('[LiveScribe] Updating running summary, delta length:', transcriptDelta.length, 'retry:', retryCount);
       
       const { data, error: fnError } = await supabase.functions.invoke('update-visit-summary', {
         body: {
@@ -429,11 +430,11 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
 
       if (fnError) {
         const errorMsg = fnError.message || 'Summary update failed';
-        console.error('[LiveScribe] Summary update error:', fnError);
+        safeErrorLog('[LiveScribe] Summary update error:', fnError);
         
         // Retry once on transient errors (504, 502, 500)
         if (retryCount === 0 && /timeout|502|504|500/i.test(errorMsg)) {
-          console.log('[LiveScribe] Retrying summary update after transient error...');
+          safeLog('[LiveScribe] Retrying summary update after transient error...');
           setTimeout(() => updateRunningSummary(1), 2000);
           return;
         }
@@ -448,7 +449,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
 
       // Handle error responses from the function
       if (data?.error) {
-        console.error('[LiveScribe] Summary function returned error:', data.error);
+        safeErrorLog('[LiveScribe] Summary function returned error:', data.error);
         setDebugInfo(prev => ({
           ...prev,
           lastSummaryError: data.error,
@@ -462,17 +463,17 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         setRunningSummary(summary);
         onSummaryUpdate?.(summary);
         lastSummaryTranscriptLengthRef.current = fullTranscript.length;
-        console.log('[LiveScribe] Summary updated successfully, length:', summary.length);
+        safeLog('[LiveScribe] Summary updated successfully, length:', summary.length);
       } else {
-        console.warn('[LiveScribe] No summary in response:', Object.keys(data || {}));
+        safeWarn('[LiveScribe] No summary in response:', Object.keys(data || {}));
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
-      console.error('[LiveScribe] Summary update failed:', err);
+      safeErrorLog('[LiveScribe] Summary update failed:', err);
       
       // Retry once on network errors
       if (retryCount === 0) {
-        console.log('[LiveScribe] Retrying summary update after error...');
+        safeLog('[LiveScribe] Retrying summary update after error...');
         setTimeout(() => updateRunningSummary(1), 2000);
         return;
       }
@@ -530,7 +531,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       audioContextRef.current = audioContext;
       
       const inputSampleRate = audioContext.sampleRate;
-      console.log(`[LiveScribe] Audio context sample rate: ${inputSampleRate} Hz`);
+      safeLog(`[LiveScribe] Audio context sample rate: ${inputSampleRate} Hz`);
       
       setDebugInfo(prev => ({
         ...prev,
@@ -566,7 +567,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       // Set up summary interval for Option B (every 30 seconds, configurable)
       if (liveDraftMode === 'B') {
         const summaryIntervalMs = 30000; // 30 seconds - can be made configurable
-        console.log(`[LiveScribe] Setting up summary interval: ${summaryIntervalMs}ms`);
+        safeLog(`[LiveScribe] Setting up summary interval: ${summaryIntervalMs}ms`);
         summaryIntervalRef.current = setInterval(() => {
           // Only call if we have meaningful new content (50+ chars since last summary)
           if (accumulatedTranscriptRef.current.length > lastSummaryTranscriptLengthRef.current + 50) {
@@ -589,7 +590,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       }, 250);
 
       setStatus('recording');
-      console.log('[LiveScribe] Recording started with PCM capture, mode:', liveDraftMode);
+      safeLog('[LiveScribe] Recording started with PCM capture, mode:', liveDraftMode);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Failed to access microphone';
       setError(errMsg);
@@ -606,11 +607,11 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const stopRecording = useCallback(async (): Promise<string> => {
     // Can stop from recording or paused state
     if (status !== 'recording' && status !== 'paused') {
-      console.log('[LiveScribe] Cannot stop - not recording or paused, status:', status);
+      debugLog('[LiveScribe] Cannot stop - not recording or paused, status:', status);
       return accumulatedTranscriptRef.current;
     }
     
-    console.log('[LiveScribe] Stopping recording from status:', status);
+    safeLog('[LiveScribe] Stopping recording from status:', status);
     setStatus('finalizing');
 
     // Stop the recording timer (freeze elapsed time)
@@ -654,7 +655,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       try {
         await sendCurrentChunks();
       } catch (err) {
-        console.error('[LiveScribe] Error processing final chunks:', err);
+        safeErrorLog('[LiveScribe] Error processing final chunks:', err);
       }
     }
 
@@ -674,7 +675,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     }
 
     setStatus('done');
-    console.log('[LiveScribe] Recording stopped, transcript length:', finalTranscript.length);
+    safeLog('[LiveScribe] Recording stopped, transcript length:', finalTranscript.length);
 
     return finalTranscript;
   }, [status, sendCurrentChunks, liveDraftMode, updateRunningSummary]);
@@ -682,11 +683,11 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   // Pause recording: stop audio capture but preserve state
   const pauseRecording = useCallback(() => {
     if (status !== 'recording') {
-      console.log('[LiveScribe] Cannot pause - not recording, status:', status);
+      debugLog('[LiveScribe] Cannot pause - not recording, status:', status);
       return;
     }
     
-    console.log('[LiveScribe] Pausing recording...');
+    safeLog('[LiveScribe] Pausing recording...');
     
     // Abort any in-flight chunk request
     if (chunkAbortControllerRef.current) {
@@ -740,17 +741,17 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     isProcessingRef.current = false;
     
     setStatus('paused');
-    console.log('[LiveScribe] Recording paused, elapsed:', recordingElapsedMs, 'ms');
+    safeLog('[LiveScribe] Recording paused, elapsed:', recordingElapsedMs, 'ms');
   }, [status, recordingElapsedMs]);
 
   // Resume recording: restart audio capture, continue appending to transcript
   const resumeRecording = useCallback(async () => {
     if (status !== 'paused') {
-      console.log('[LiveScribe] Cannot resume - not paused, status:', status);
+      debugLog('[LiveScribe] Cannot resume - not paused, status:', status);
       return;
     }
     
-    console.log('[LiveScribe] Resuming recording...');
+    safeLog('[LiveScribe] Resuming recording...');
     
     try {
       // Re-acquire microphone
@@ -770,7 +771,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       audioContextRef.current = audioContext;
       
       const inputSampleRate = audioContext.sampleRate;
-      console.log(`[LiveScribe] Resume - Audio context sample rate: ${inputSampleRate} Hz`);
+      safeLog(`[LiveScribe] Resume - Audio context sample rate: ${inputSampleRate} Hz`);
       
       setDebugInfo(prev => ({
         ...prev,
@@ -803,7 +804,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       
       // Restart summary interval for Option B
       if (liveDraftMode === 'B') {
-        console.log('[LiveScribe] Resume - Restarting summary interval');
+        safeLog('[LiveScribe] Resume - Restarting summary interval');
         summaryIntervalRef.current = setInterval(() => {
           if (accumulatedTranscriptRef.current.length > lastSummaryTranscriptLengthRef.current + 50) {
             updateRunningSummary();
@@ -828,10 +829,10 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       }, 250);
       
       setStatus('recording');
-      console.log('[LiveScribe] Recording resumed, continuing from elapsed:', recordingElapsedMs, 'ms');
+      safeLog('[LiveScribe] Recording resumed, continuing from elapsed:', recordingElapsedMs, 'ms');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Failed to resume microphone access';
-      console.error('[LiveScribe] Resume failed:', err);
+      safeErrorLog('[LiveScribe] Resume failed:', err);
       setError(errMsg);
       // Stay in paused state rather than erroring out completely
       onError?.(errMsg);

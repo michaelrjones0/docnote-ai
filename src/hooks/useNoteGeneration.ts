@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { safeErrorLog } from '@/lib/debug';
 
 export type NoteType = 'SOAP' | 'H&P' | 'Progress' | 'Procedure';
 
@@ -47,7 +48,7 @@ export function useNoteGeneration() {
       return note;
 
     } catch (err) {
-      console.error('Note generation error:', err);
+      safeErrorLog('[NoteGeneration] Error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate note';
       setError(errorMessage);
       throw err;

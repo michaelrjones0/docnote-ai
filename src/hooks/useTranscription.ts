@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { safeErrorLog, debugLogPHI } from '@/lib/debug';
 
 interface TranscriptSegment {
   id: string;
@@ -68,6 +69,9 @@ export function useTranscription() {
           endMs: number;
         }> | undefined;
         
+        // Debug log PHI only in debug mode
+        debugLogPHI('[Transcription] Received text:', text, 100);
+        
         // Prefer segments if available, otherwise use full text
         if (segments && segments.length > 0) {
           const newSegments: TranscriptSegment[] = segments.map((seg, idx) => ({
@@ -106,7 +110,7 @@ export function useTranscription() {
         return text;
 
       } catch (err) {
-        console.error('Transcription error:', err);
+        safeErrorLog('[Transcription] Error:', err);
         const errorMessage = err instanceof Error ? err.message : 'Transcription failed';
         setError(errorMessage);
         throw err;

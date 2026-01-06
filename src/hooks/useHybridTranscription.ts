@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { safeLog, safeErrorLog, debugLogPHI } from '@/lib/debug';
 
 interface TranscriptSegment {
   id: string;
@@ -55,6 +56,9 @@ export function useHybridTranscription() {
 
       const text = data?.text || '';
       
+      // Debug log PHI only in debug mode
+      debugLogPHI('[HybridTranscription] Live chunk text:', text, 100);
+      
       if (text) {
         const segment: TranscriptSegment = {
           id: crypto.randomUUID(),
@@ -68,7 +72,7 @@ export function useHybridTranscription() {
       return text;
 
     } catch (err) {
-      console.error('Live transcription error:', err);
+      safeErrorLog('[HybridTranscription] Live transcription error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Live transcription failed';
       setError(errorMessage);
       // Don't throw - live transcription errors shouldn't block the encounter
@@ -99,7 +103,7 @@ export function useHybridTranscription() {
       reader.readAsDataURL(fullAudioBlob);
       const base64Audio = await base64Promise;
 
-      console.log('Starting batch transcription for encounter:', encounterId);
+      safeLog('[HybridTranscription] Starting batch transcription for encounter:', encounterId);
 
       const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-batch', {
         body: { 
@@ -119,12 +123,12 @@ export function useHybridTranscription() {
       };
 
       setBatchTranscript(result.text);
-      console.log('Batch transcription completed');
+      safeLog('[HybridTranscription] Batch transcription completed, length:', result.text.length);
 
       return result;
 
     } catch (err) {
-      console.error('Batch transcription error:', err);
+      safeErrorLog('[HybridTranscription] Batch transcription error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Batch transcription failed';
       setError(errorMessage);
       throw err;
