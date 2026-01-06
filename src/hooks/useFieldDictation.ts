@@ -61,7 +61,11 @@ export function useFieldDictation({
   // Stop recording and transcribe
   const stopRecording = useCallback(async (): Promise<void> => {
     if (isStoppingRef.current) return;
-    if (!mediaRecorderRef.current || state.status !== 'listening') {
+    
+    const recorder = mediaRecorderRef.current;
+    // Use recorder.state instead of React state to avoid stale closure issues
+    // when this callback is invoked from another field via stopActiveCallbackRef
+    if (!recorder || recorder.state !== 'recording') {
       cleanup();
       return;
     }
@@ -143,7 +147,7 @@ export function useFieldDictation({
       
       recorder.stop();
     });
-  }, [fieldId, state.status, onInsertText, onError, cleanup]);
+  }, [fieldId, onInsertText, onError, cleanup]);
 
   // Start recording
   const startRecording = useCallback(async () => {
