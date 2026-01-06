@@ -19,14 +19,13 @@ export function useAuth() {
     isLoading: true,
   });
 
-  const fetchRoles = useCallback(async (userId: string) => {
+  const fetchRoles = useCallback(async () => {
+    // RLS policy filters to current user via auth.uid() - no need to pass user_id
     const { data, error } = await supabase
       .from('user_roles')
-      .select('role')
-      .eq('user_id', userId);
+      .select('role');
     
     if (error) {
-      console.error('Error fetching roles:', error);
       return [];
     }
     
@@ -46,7 +45,7 @@ export function useAuth() {
         // Defer role fetching with setTimeout
         if (session?.user) {
           setTimeout(async () => {
-            const roles = await fetchRoles(session.user.id);
+            const roles = await fetchRoles();
             setAuthState(prev => ({
               ...prev,
               roles,
@@ -72,7 +71,7 @@ export function useAuth() {
       }));
 
       if (session?.user) {
-        const roles = await fetchRoles(session.user.id);
+        const roles = await fetchRoles();
         setAuthState(prev => ({
           ...prev,
           roles,
