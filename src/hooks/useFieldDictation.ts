@@ -9,6 +9,22 @@
  * - Sends audio to existing transcribe-audio-live edge function
  * - Manages state per-field with global singleton to enforce single active field
  * - PHI-safe: No transcript content is logged
+ * 
+ * ============================================================================
+ * DICTATION SMOKE TEST CHECKLIST (run manually before adding new features):
+ * ============================================================================
+ * 1. Start mic on Subjective → speak 5-10s → stop → text appears in Subjective.
+ * 2. While Subjective listening, start Objective → Subjective stops+transcribes,
+ *    Objective starts listening. (No lost transcription.)
+ * 3. Click in middle of existing text, dictate, stop → insertion at cursor (not append).
+ * 4. No console/network logs include transcript text or base64 audio data.
+ * ============================================================================
+ * 
+ * RELIABILITY NOTE:
+ * - stopRecording() uses mediaRecorderRef.current.state (NOT React state.status)
+ *   to avoid stale closure bugs when triggered by another field's activation.
+ * - stopActiveCallbackRef.current is set when recording starts, capturing the
+ *   stopRecording callback for cross-field coordination.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
