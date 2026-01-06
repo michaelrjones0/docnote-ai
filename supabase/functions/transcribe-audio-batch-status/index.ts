@@ -1,7 +1,8 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { getCorsHeaders, getAwsConfig } from "../_shared/env.ts";
+import { requireUser, isAuthError } from "../_shared/auth.ts";
+import { errorResponse } from "../_shared/response.ts";
 
 async function hmacSHA256(key: ArrayBuffer | Uint8Array, message: string): Promise<ArrayBuffer> {
   let keyBuffer: ArrayBuffer;
@@ -234,35 +235,6 @@ async function getMedicalTranscriptionJobStatus(
   };
 }
 
-async function verifyJWT(req: Request): Promise<{ userId: string } | null> {
-  const authHeader = req.headers.get('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.replace('Bearer ', '');
-  
-  const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('Supabase env vars not configured');
-    return null;
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false }
-  });
-
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  
-  if (error || !user) {
-    console.error('JWT verification failed:', error?.message);
-    return null;
-  }
-
-  return { userId: user.id };
-}
 
 serve(async (req) => {
   const origin = req.headers.get('Origin');
@@ -281,13 +253,10 @@ serve(async (req) => {
     );
   }
 
-  // Verify JWT
-  const authResult = await verifyJWT(req);
-  if (!authResult) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized: valid JWT required' }),
-      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+  // Verify JWT using shared auth helper
+  const authResult = await requireUser(req, corsHeaders);
+  if (isAuthError(authResult)) {
+    return authResult.error;
   }
 
   try {
