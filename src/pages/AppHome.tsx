@@ -147,13 +147,15 @@ const AppHome = () => {
     }
   };
 
-  const getTranscriptFromBatchStatus = (): string | null => {
-    if (!batchStatusResult) return null;
+  const getTranscriptFromBatchStatus = (): string => {
+    if (!batchStatusResult) return '';
     try {
       const parsed = JSON.parse(batchStatusResult);
-      return parsed?.transcript?.text || null;
+      // Check both direct .text and nested .result.text
+      const text = (parsed?.text ?? parsed?.result?.text) ?? '';
+      return typeof text === 'string' ? text.trim() : '';
     } catch {
-      return null;
+      return '';
     }
   };
 
