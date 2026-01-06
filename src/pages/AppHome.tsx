@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogOut, ShieldCheck } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play } from 'lucide-react';
 
 const AppHome = () => {
   const { user, session, isLoading, signOut } = useAuth();
@@ -18,6 +18,8 @@ const AppHome = () => {
   const [batchStatusResult, setBatchStatusResult] = useState<string | null>(null);
   const [isTestingBatchStatus, setIsTestingBatchStatus] = useState(false);
   const [jobName, setJobName] = useState('');
+  const [startBatchResult, setStartBatchResult] = useState<string | null>(null);
+  const [isStartingBatch, setIsStartingBatch] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -72,7 +74,8 @@ const AppHome = () => {
     }
   };
 
-  const handleTestBatchStatus = async () => {
+  const handleTestBatchStatus = async (overrideJobName?: string) => {
+    const jobNameToUse = overrideJobName ?? jobName;
     if (!session?.access_token) {
       setBatchStatusResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
       return;
@@ -90,7 +93,7 @@ const AppHome = () => {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ jobName }),
+          body: JSON.stringify({ jobName: jobNameToUse }),
         }
       );
 
@@ -100,6 +103,45 @@ const AppHome = () => {
       setBatchStatusResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
     } finally {
       setIsTestingBatchStatus(false);
+    }
+  };
+
+  const handleStartBatchLatest = async () => {
+    if (!session?.access_token) {
+      setStartBatchResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
+      return;
+    }
+
+    setIsStartingBatch(true);
+    setStartBatchResult(null);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-latest`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+      setStartBatchResult(JSON.stringify(data, null, 2));
+      
+      // On success, auto-fill jobName and trigger batch status check
+      if (data.ok && data.jobName) {
+        setJobName(data.jobName);
+        // Wait a moment then trigger the batch status check
+        setTimeout(() => {
+          handleTestBatchStatus(data.jobName);
+        }, 500);
+      }
+    } catch (err) {
+      setStartBatchResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
+    } finally {
+      setIsStartingBatch(false);
     }
   };
 
@@ -142,6 +184,26 @@ const AppHome = () => {
               </pre>
             )}
 
+            <Button 
+              onClick={handleStartBatchLatest} 
+              disabled={isStartingBatch} 
+              className="w-full"
+              variant="secondary"
+            >
+              {isStartingBatch ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Start Batch (Latest Audio)
+            </Button>
+            
+            {startBatchResult && (
+              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
+                {startBatchResult}
+              </pre>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="jobName">jobName</Label>
               <Input
@@ -153,7 +215,7 @@ const AppHome = () => {
             </div>
 
             <Button 
-              onClick={handleTestBatchStatus} 
+              onClick={() => handleTestBatchStatus()} 
               disabled={isTestingBatchStatus || !jobName.trim()} 
               className="w-full"
             >
