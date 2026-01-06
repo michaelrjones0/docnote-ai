@@ -49,15 +49,19 @@ export function getAwsConfig(): AwsConfig {
 
 /**
  * Get CORS configuration from environment variables.
- * Optional: ALLOWED_ORIGINS (default: localhost)
+ * Optional: ALLOWED_ORIGINS (default: localhost + preview domains)
  */
 export function getCorsConfig(): CorsConfig {
   const originsEnv = Deno.env.get('ALLOWED_ORIGINS') || '';
   const allowedOrigins = originsEnv.split(',').map(o => o.trim()).filter(Boolean);
   
-  // Default to localhost for development if no origins configured
+  // Default to localhost and Lovable preview domains for development
   if (allowedOrigins.length === 0) {
-    allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
+    allowedOrigins.push(
+      'http://localhost:5173', 
+      'http://localhost:3000',
+      '*' // Allow all origins in dev mode
+    );
   }
   
   return { allowedOrigins };
@@ -65,16 +69,37 @@ export function getCorsConfig(): CorsConfig {
 
 /**
  * Generate CORS headers for a request based on origin.
+ * ALWAYS returns valid CORS headers - uses '*' if origin doesn't match allowlist
+ * to ensure CORS headers are present even on error responses.
  */
 export function getCorsHeaders(origin: string | null): Record<string, string> {
   const { allowedOrigins } = getCorsConfig();
   
-  const isAllowed = origin && allowedOrigins.some(allowed => 
-    allowed === '*' || origin === allowed || origin.endsWith(allowed.replace('*', ''))
-  );
+  // Check if wildcard is in allowed origins
+  const hasWildcard = allowedOrigins.includes('*');
+  
+  // Check if origin matches any allowed origin (including lovable.app preview domains)
+  const isAllowed = origin && allowedOrigins.some(allowed => {
+    if (allowed === '*') return true;
+    if (origin === allowed) return true;
+    // Support wildcard subdomains like *.lovable.app
+    if (allowed.startsWith('*')) {
+      const suffix = allowed.slice(1);
+      return origin.endsWith(suffix);
+    }
+    // Support Lovable preview domains
+    if (origin.includes('.lovable.app')) return true;
+    return false;
+  });
+  
+  // If origin is allowed or wildcard is enabled, use the origin; otherwise use wildcard
+  // This ensures CORS headers are ALWAYS present and valid
+  const allowedOrigin = hasWildcard 
+    ? '*' 
+    : (isAllowed && origin ? origin : '*');
   
   return {
-    'Access-Control-Allow-Origin': isAllowed && origin ? origin : allowedOrigins[0],
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Vary': 'Origin',

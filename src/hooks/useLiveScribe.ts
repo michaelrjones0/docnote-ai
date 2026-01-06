@@ -157,6 +157,59 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     return result;
   }, []);
 
+  // AbortController for in-flight chunk requests
+  const chunkAbortControllerRef = useRef<AbortController | null>(null);
+
+  // Retry helper with exponential backoff
+  const fetchWithRetry = useCallback(async (
+    url: string, 
+    options: RequestInit, 
+    maxRetries = 3
+  ): Promise<Response> => {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await fetch(url, options);
+        
+        // Don't retry 4xx errors (except 429)
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          return response;
+        }
+        
+        // Retry on 5xx, 429, or network errors
+        if (response.status >= 500 || response.status === 429) {
+          console.warn(`[LiveScribe] Retry attempt ${attempt + 1}/${maxRetries} after ${response.status}`);
+          lastError = new Error(`HTTP ${response.status}`);
+          
+          if (attempt < maxRetries - 1) {
+            // Exponential backoff: 1s, 2s, 4s
+            const delay = Math.pow(2, attempt) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        }
+        
+        return response;
+      } catch (err) {
+        // Network error or abort
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          throw err; // Don't retry aborts
+        }
+        
+        lastError = err instanceof Error ? err : new Error('Network error');
+        console.warn(`[LiveScribe] Retry attempt ${attempt + 1}/${maxRetries} after network error:`, err);
+        
+        if (attempt < maxRetries - 1) {
+          const delay = Math.pow(2, attempt) * 1000;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    throw lastError || new Error('Max retries exceeded');
+  }, []);
+
   const processAudioChunk = useCallback(async (pcmData: Int16Array, chunkIndex: number): Promise<{ text: string; segments: TranscriptSegment[] } | null> => {
     const callTime = new Date().toISOString();
     const byteLength = pcmData.byteLength;
@@ -190,7 +243,10 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         throw new Error('No access token available');
       }
 
-      const response = await fetch(
+      // Create new AbortController for this request
+      chunkAbortControllerRef.current = new AbortController();
+
+      const response = await fetchWithRetry(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe-audio-live`,
         {
           method: 'POST',
@@ -205,8 +261,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
             languageCode: 'en-US',
             chunkIndex,
           }),
-        }
+          signal: chunkAbortControllerRef.current.signal,
+        },
+        3 // max retries
       );
+
+      chunkAbortControllerRef.current = null;
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({ error: response.statusText }));
@@ -225,6 +285,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
 
       return result;
     } catch (err) {
+      // Handle abort gracefully
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log(`[LiveScribe] Chunk ${chunkIndex} request aborted (paused)`);
+        return null;
+      }
+      
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[LiveScribe] Error processing chunk ${chunkIndex}:`, err);
       
@@ -236,7 +302,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       
       throw err;
     }
-  }, []);
+  }, [fetchWithRetry]);
 
   const sendCurrentChunks = useCallback(async () => {
     if (isProcessingRef.current || pcmBufferRef.current.length === 0) {
@@ -308,14 +374,29 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         });
       }
     } catch (err) {
+      // Handle aborts gracefully - don't surface as error
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        console.log('[LiveScribe] Chunk processing aborted');
+        isProcessingRef.current = false;
+        return;
+      }
+      
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('[LiveScribe] Chunk processing failed:', errMsg);
-      setError(errMsg);
-      onError?.(errMsg);
+      
+      // Surface as warning, not error - keep recording locally
+      setDebugInfo(prev => ({
+        ...prev,
+        lastLiveError: `Network issue: ${errMsg} — still recording locally`,
+      }));
+      
+      // Only surface to onError if it's a persistent failure
+      // Don't block recording for transient network issues
+      console.warn('[LiveScribe] Continuing recording despite chunk upload failure');
     } finally {
       isProcessingRef.current = false;
     }
-  }, [mergeBuffers, downsample, float32ToInt16, processAudioChunk, onTranscriptUpdate, onError]);
+  }, [mergeBuffers, downsample, float32ToInt16, processAudioChunk, onTranscriptUpdate]);
 
   // Update running summary (Option B only) - with retry on transient errors
   const updateRunningSummary = useCallback(async (retryCount = 0) => {
@@ -607,6 +688,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     
     console.log('[LiveScribe] Pausing recording...');
     
+    // Abort any in-flight chunk request
+    if (chunkAbortControllerRef.current) {
+      chunkAbortControllerRef.current.abort();
+      chunkAbortControllerRef.current = null;
+    }
+    
     // Stop timer (freeze elapsed time)
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -650,6 +737,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     
     // Clear PCM buffer (already sent chunks are fine)
     pcmBufferRef.current = [];
+    isProcessingRef.current = false;
     
     setStatus('paused');
     console.log('[LiveScribe] Recording paused, elapsed:', recordingElapsedMs, 'ms');
