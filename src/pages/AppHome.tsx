@@ -10,8 +10,9 @@ import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause, Pencil } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
@@ -75,6 +76,7 @@ const AppHome = () => {
   const [pendingSignatureName, setPendingSignatureName] = useState('');
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
   const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
+  const [showEndEncounterDialog, setShowEndEncounterDialog] = useState(false);
   const { preferences, setPreferences } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
@@ -441,6 +443,31 @@ const AppHome = () => {
     setPendingSignatureName(preferences.clinicianDisplayName);
     setShowSignatureModal(true);
   }, [preferences.clinicianDisplayName]);
+
+  // Handler for ending encounter and starting fresh
+  const handleEndEncounter = useCallback(() => {
+    // Clear session data (transcript, notes, running summary)
+    clearSession();
+    
+    // Clear live scribe state if any
+    if (liveScribe.status !== 'idle') {
+      // Force reset live scribe internal state - handled by clearSession already
+    }
+    
+    // Clear patient-specific fields from preferences (keep clinician settings)
+    setPreferences({ 
+      patientName: '', 
+      patientGender: undefined 
+    });
+    
+    // Close dialog
+    setShowEndEncounterDialog(false);
+    
+    toast({
+      title: 'Encounter ended',
+      description: 'Ready for a new patient. Please enter patient info to begin.',
+    });
+  }, [clearSession, liveScribe.status, setPreferences, toast]);
 
   const copyToClipboard = async (text: string, fieldName: string) => {
     try {
@@ -809,6 +836,19 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 </Button>
               )}
               </div>
+              
+              {/* End Encounter Button - always visible when not actively recording */}
+              {liveScribe.status !== 'recording' && liveScribe.status !== 'paused' && liveScribe.status !== 'finalizing' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowEndEncounterDialog(true)}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  <UserX className="h-4 w-4 mr-2" />
+                  End Encounter / New Patient
+                </Button>
+              )}
             </div>
 
             {/* Running Summary Panel (Option B only) - show during recording, paused, or if summary exists */}
@@ -1587,6 +1627,32 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* End Encounter Confirmation Dialog */}
+        <AlertDialog open={showEndEncounterDialog} onOpenChange={setShowEndEncounterDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Start a new encounter?</AlertDialogTitle>
+              <AlertDialogDescription className="space-y-2">
+                <span className="block">This will clear:</span>
+                <ul className="list-disc list-inside text-sm space-y-1">
+                  <li>Current transcript and running summary</li>
+                  <li>Generated SOAP note and Patient Instructions</li>
+                  <li>Patient name and gender</li>
+                </ul>
+                <span className="block text-destructive font-medium mt-2">
+                  ⚠️ This action cannot be undone.
+                </span>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleEndEncounter} className="bg-destructive hover:bg-destructive/90">
+                End Encounter
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Transcript Section */}
         <Card>
