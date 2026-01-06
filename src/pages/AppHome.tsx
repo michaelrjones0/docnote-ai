@@ -402,7 +402,7 @@ const AppHome = () => {
     }
   };
 
-  const CopyButton = ({ text, label }: { text: string; label: string }) => (
+const CopyButton = ({ text, label }: { text: string; label: string }) => (
     <Button
       variant="outline"
       size="sm"
@@ -418,6 +418,64 @@ const AppHome = () => {
       {label}
     </Button>
   );
+
+  // Per-section copy button with inline feedback
+  const SectionCopyButton = ({ text, sectionName }: { text: string; sectionName: string }) => {
+    const [copied, setCopied] = useState(false);
+    const [disabled, setDisabled] = useState(false);
+
+    const handleCopy = async () => {
+      if (disabled) return;
+      
+      if (!text || !text.trim()) {
+        toast({
+          title: 'Nothing to copy',
+          description: `${sectionName} section is empty.`,
+          variant: 'default',
+        });
+        return;
+      }
+
+      setDisabled(true);
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => {
+          setCopied(false);
+          setDisabled(false);
+        }, 1500);
+      } catch {
+        toast({
+          title: 'Copy failed',
+          description: 'Could not copy to clipboard.',
+          variant: 'destructive',
+        });
+        setDisabled(false);
+      }
+    };
+
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleCopy}
+        disabled={disabled}
+        className="h-6 px-2 text-xs flex items-center gap-1"
+      >
+        {copied ? (
+          <>
+            <Check className="h-3 w-3" />
+            Copied
+          </>
+        ) : (
+          <>
+            <Copy className="h-3 w-3" />
+            Copy
+          </>
+        )}
+      </Button>
+    );
+  };
 
   const handleClearSession = () => {
     clearSession();
@@ -1115,9 +1173,12 @@ const AppHome = () => {
                 {/* Editable SOAP Cards - 4 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Subjective
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Subjective
+                      </Label>
+                      <SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap-subjective"
                       value={currentSoap.subjective || ''}
@@ -1127,9 +1188,12 @@ const AppHome = () => {
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Objective
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Objective
+                      </Label>
+                      <SectionCopyButton text={currentSoap.objective || ''} sectionName="Objective" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap-objective"
                       value={currentSoap.objective || ''}
@@ -1139,9 +1203,12 @@ const AppHome = () => {
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Assessment
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Assessment
+                      </Label>
+                      <SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap-assessment"
                       value={currentSoap.assessment || ''}
@@ -1151,9 +1218,12 @@ const AppHome = () => {
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Plan
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Plan
+                      </Label>
+                      <SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap-plan"
                       value={currentSoap.plan || ''}
@@ -1197,9 +1267,12 @@ const AppHome = () => {
                 {/* Editable SOAP Cards - 3 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap3-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Subjective
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap3-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Subjective
+                      </Label>
+                      <SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap3-subjective"
                       value={currentSoap3.subjective || ''}
@@ -1209,9 +1282,12 @@ const AppHome = () => {
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap3-objective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Objective
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap3-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Objective
+                      </Label>
+                      <SectionCopyButton text={currentSoap3.objective || ''} sectionName="Objective" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap3-objective"
                       value={currentSoap3.objective || ''}
@@ -1221,9 +1297,12 @@ const AppHome = () => {
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <Label htmlFor="soap3-assessmentPlan" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
-                      Assessment & Plan
-                    </Label>
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap3-assessmentPlan" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Assessment & Plan
+                      </Label>
+                      <SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />
+                    </div>
                     <AutoResizeTextarea
                       id="soap3-assessmentPlan"
                       value={currentSoap3.assessmentPlan || ''}
