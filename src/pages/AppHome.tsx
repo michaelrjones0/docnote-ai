@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 import { useDocNoteSession } from '@/hooks/useDocNoteSession';
+import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
 interface SoapData {
   subjective: string;
@@ -298,27 +299,30 @@ const AppHome = () => {
   const exportJson = getExportJson();
 
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-xl">DocNoteAI</CardTitle>
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-muted-foreground">{user.email}</span>
-                <Button onClick={handleClearSession} variant="outline" size="sm">
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Clear Session
-                </Button>
-                <Button onClick={handleLogout} variant="outline" size="sm">
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Log Out
-                </Button>
+    <DemoModeGuard>
+      <DemoModeBanner />
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* Header */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xl">DocNoteAI</CardTitle>
+                <div className="flex items-center gap-4">
+                  <ResetDemoAckButton />
+                  <span className="text-sm text-muted-foreground">{user.email}</span>
+                  <Button onClick={handleClearSession} variant="outline" size="sm">
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clear Session
+                  </Button>
+                  <Button onClick={handleLogout} variant="outline" size="sm">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Log Out
+                  </Button>
+                </div>
               </div>
-            </div>
-          </CardHeader>
-        </Card>
+            </CardHeader>
+          </Card>
 
         {/* Conflict Banner */}
         {showConflictBanner && (
@@ -572,9 +576,10 @@ const AppHome = () => {
               </div>
             )}
           </CardContent>
-        </Card>
+          </Card>
+        </div>
       </div>
-    </div>
+    </DemoModeGuard>
   );
 };
 
