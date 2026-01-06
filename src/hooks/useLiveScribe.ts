@@ -58,6 +58,11 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const [runningSummary, setRunningSummary] = useState<string | null>(null);
   
+  // Recording timer state
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const recordingStartMsRef = useRef<number | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Debug state
   const [debugInfo, setDebugInfo] = useState<LiveScribeDebugInfo>({
     lastLiveCallAt: null,
@@ -473,6 +478,15 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         }, 75000);
       }
 
+      // Start the recording timer
+      recordingStartMsRef.current = Date.now();
+      setRecordingElapsedMs(0);
+      timerIntervalRef.current = setInterval(() => {
+        if (recordingStartMsRef.current) {
+          setRecordingElapsedMs(Date.now() - recordingStartMsRef.current);
+        }
+      }, 250);
+
       setStatus('recording');
       console.log('[LiveScribe] Recording started with PCM capture, mode:', liveDraftMode);
     } catch (err) {
@@ -491,6 +505,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const stopRecording = useCallback(async (): Promise<string> => {
     console.log('[LiveScribe] Stopping recording...');
     setStatus('finalizing');
+
+    // Stop the recording timer (freeze elapsed time)
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
 
     // Clear intervals
     if (intervalRef.current) {
@@ -553,6 +573,14 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   }, [sendCurrentChunks, liveDraftMode, updateRunningSummary]);
 
   const reset = useCallback(() => {
+    // Clear timer
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    recordingStartMsRef.current = null;
+    setRecordingElapsedMs(0);
+
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -612,6 +640,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     error,
     runningSummary,
     debugInfo,
+    recordingElapsedMs,
     startRecording,
     stopRecording,
     reset,
