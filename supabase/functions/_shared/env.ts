@@ -48,60 +48,70 @@ export function getAwsConfig(): AwsConfig {
 }
 
 /**
- * Get CORS configuration from environment variables.
- * Optional: ALLOWED_ORIGINS (default: localhost + preview domains)
+ * Check if an origin is allowed for CORS.
+ * Strict allowlist - PHI-ready security.
  */
-export function getCorsConfig(): CorsConfig {
-  const originsEnv = Deno.env.get('ALLOWED_ORIGINS') || '';
-  const allowedOrigins = originsEnv.split(',').map(o => o.trim()).filter(Boolean);
+export function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
   
-  // Default to localhost and Lovable preview domains for development
-  if (allowedOrigins.length === 0) {
-    allowedOrigins.push(
-      'http://localhost:5173', 
-      'http://localhost:3000',
-      '*' // Allow all origins in dev mode
-    );
+  // Exact matches for known domains
+  const exactAllowed = [
+    'https://lovable.dev',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:8080',
+  ];
+  
+  if (exactAllowed.includes(origin)) {
+    return true;
   }
   
-  return { allowedOrigins };
+  // Lovable preview domains: https://*.lovable.app
+  if (/^https:\/\/[a-zA-Z0-9-]+\.lovable\.app$/.test(origin)) {
+    return true;
+  }
+  
+  // Check ALLOWED_ORIGINS env var for additional production domains
+  const originsEnv = Deno.env.get('ALLOWED_ORIGINS') || '';
+  const customOrigins = originsEnv.split(',').map(o => o.trim()).filter(Boolean);
+  
+  if (customOrigins.includes(origin)) {
+    return true;
+  }
+  
+  return false;
 }
 
 /**
  * Generate CORS headers for a request based on origin.
- * ALWAYS returns valid CORS headers - uses '*' if origin doesn't match allowlist
- * to ensure CORS headers are present even on error responses.
+ * Strict behavior: never uses "*" - only echoes allowed origins.
+ * Returns { headers, isAllowed } so callers can block disallowed origins.
  */
-export function getCorsHeaders(origin: string | null): Record<string, string> {
-  const { allowedOrigins } = getCorsConfig();
+export function getCorsHeaders(origin: string | null): { headers: Record<string, string>; isAllowed: boolean } {
+  const allowed = isAllowedOrigin(origin);
   
-  // Check if wildcard is in allowed origins
-  const hasWildcard = allowedOrigins.includes('*');
-  
-  // Check if origin matches any allowed origin (including lovable.app preview domains)
-  const isAllowed = origin && allowedOrigins.some(allowed => {
-    if (allowed === '*') return true;
-    if (origin === allowed) return true;
-    // Support wildcard subdomains like *.lovable.app
-    if (allowed.startsWith('*')) {
-      const suffix = allowed.slice(1);
-      return origin.endsWith(suffix);
-    }
-    // Support Lovable preview domains
-    if (origin.includes('.lovable.app')) return true;
-    return false;
-  });
-  
-  // If origin is allowed or wildcard is enabled, use the origin; otherwise use wildcard
-  // This ensures CORS headers are ALWAYS present and valid
-  const allowedOrigin = hasWildcard 
-    ? '*' 
-    : (isAllowed && origin ? origin : '*');
-  
-  return {
-    'Access-Control-Allow-Origin': allowedOrigin,
+  // Base headers always present (for well-formed preflight responses)
+  const baseHeaders: Record<string, string> = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Vary': 'Origin',
+    'Access-Control-Max-Age': '86400',
+  };
+  
+  if (allowed && origin) {
+    // Echo the allowed origin - never use "*"
+    return {
+      headers: {
+        ...baseHeaders,
+        'Access-Control-Allow-Origin': origin,
+        'Vary': 'Origin',
+      },
+      isAllowed: true,
+    };
+  }
+  
+  // Origin not allowed - do NOT set Access-Control-Allow-Origin
+  return {
+    headers: baseHeaders,
+    isAllowed: false,
   };
 }

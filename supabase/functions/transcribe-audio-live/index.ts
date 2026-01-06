@@ -482,16 +482,26 @@ async function fetchTranscriptFromS3(
 }
 
 serve(async (req) => {
-  // Get CORS headers immediately - ensures headers exist on ALL responses
+  // Get CORS result immediately - ensures consistent behavior
   const origin = req.headers.get('Origin');
-  const corsHeaders = getCorsHeaders(origin);
+  const { headers: corsHeaders, isAllowed: originAllowed } = getCorsHeaders(origin);
 
   // Handle CORS preflight OPTIONS request
   if (req.method === 'OPTIONS') {
+    // Return 204 with CORS headers (even if origin not allowed, to give well-formed preflight)
     return new Response(null, { 
       status: 204, 
       headers: corsHeaders 
     });
+  }
+
+  // Block requests from disallowed origins
+  if (!originAllowed) {
+    console.warn(`Blocked request from disallowed origin: ${origin}`);
+    return new Response(
+      JSON.stringify({ error: 'Origin not allowed', code: 'CORS_BLOCKED' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   // Wrap entire handler in try-catch to ensure CORS headers on ALL errors
