@@ -5,6 +5,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Timeout for AI gateway call (30 seconds)
+const AI_TIMEOUT_MS = 30000;
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -12,22 +15,42 @@ serve(async (req) => {
   }
 
   try {
-    const { transcriptDelta, runningSummary, preferences } = await req.json();
+    const body = await req.json();
+    
+    // Log received request keys for debugging
+    console.log('[update-visit-summary] Request body keys:', Object.keys(body));
+    
+    const { transcriptDelta, runningSummary, preferences } = body;
+    
+    console.log('[update-visit-summary] Received:', {
+      transcriptDeltaLength: transcriptDelta?.length ?? 0,
+      runningSummaryLength: runningSummary?.length ?? 0,
+      hasPreferences: !!preferences,
+    });
 
+    // Validate transcriptDelta
     if (!transcriptDelta || typeof transcriptDelta !== 'string' || !transcriptDelta.trim()) {
+      console.error('[update-visit-summary] Invalid transcriptDelta:', typeof transcriptDelta, transcriptDelta?.length);
       return new Response(
-        JSON.stringify({ error: 'transcriptDelta is required' }),
+        JSON.stringify({ 
+          error: 'transcriptDelta is required and must be a non-empty string',
+          received: { type: typeof transcriptDelta, length: transcriptDelta?.length }
+        }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-    if (!OPENAI_API_KEY) {
+    // Use Lovable AI Gateway (LOVABLE_API_KEY is auto-provisioned)
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    if (!LOVABLE_API_KEY) {
+      console.error('[update-visit-summary] LOVABLE_API_KEY not found in environment');
       return new Response(
-        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        JSON.stringify({ error: 'AI API key not configured (LOVABLE_API_KEY missing)' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    console.log('[update-visit-summary] LOVABLE_API_KEY present, length:', LOVABLE_API_KEY.length);
 
     // Build the voice instruction
     const voiceInstruction = preferences?.firstPerson === true
@@ -64,53 +87,111 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
       ? `Previous summary:\n${runningSummary}\n\nNew transcript chunk:\n${transcriptDelta}`
       : `New transcript chunk:\n${transcriptDelta}`;
 
-    console.log('[update-visit-summary] Processing transcript delta, length:', transcriptDelta.length);
+    console.log('[update-visit-summary] Calling Lovable AI Gateway, transcript delta length:', transcriptDelta.length);
 
-    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        temperature: 0.3,
-        max_tokens: 600,
-      }),
-    });
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
 
-    if (!openaiResponse.ok) {
-      const errorText = await openaiResponse.text();
-      console.error('[update-visit-summary] OpenAI error:', errorText);
+    let aiResponse: Response;
+    try {
+      aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ],
+        }),
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        console.error('[update-visit-summary] AI Gateway timeout after', AI_TIMEOUT_MS, 'ms');
+        return new Response(
+          JSON.stringify({ error: 'AI request timed out, please try again' }),
+          { status: 504, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      throw fetchError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    console.log('[update-visit-summary] AI Gateway response status:', aiResponse.status);
+
+    if (!aiResponse.ok) {
+      const errorText = await aiResponse.text();
+      console.error('[update-visit-summary] AI Gateway error:', aiResponse.status, errorText);
+      
+      // Handle rate limiting
+      if (aiResponse.status === 429) {
+        return new Response(
+          JSON.stringify({ error: 'Rate limit exceeded, please try again later' }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // Handle payment required
+      if (aiResponse.status === 402) {
+        return new Response(
+          JSON.stringify({ error: 'AI credits exhausted, please add funds' }),
+          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
       return new Response(
-        JSON.stringify({ error: 'Failed to generate summary' }),
+        JSON.stringify({ 
+          error: `AI Gateway error: ${aiResponse.status}`,
+          details: errorText.slice(0, 500)
+        }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const openaiData = await openaiResponse.json();
-    const newSummary = openaiData.choices?.[0]?.message?.content?.trim() || '';
+    const aiData = await aiResponse.json();
+    console.log('[update-visit-summary] AI response received, choices:', aiData.choices?.length);
+    
+    const newSummary = aiData.choices?.[0]?.message?.content?.trim() || '';
+
+    if (!newSummary) {
+      console.error('[update-visit-summary] Empty summary from AI:', JSON.stringify(aiData).slice(0, 500));
+      return new Response(
+        JSON.stringify({ error: 'AI returned empty summary' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Enforce max length
     const truncatedSummary = newSummary.length > 1200 
       ? newSummary.slice(0, 1200) + '...'
       : newSummary;
 
-    console.log('[update-visit-summary] Generated summary, length:', truncatedSummary.length);
+    const updatedAt = new Date().toISOString();
+    console.log('[update-visit-summary] Success! Summary length:', truncatedSummary.length);
 
     return new Response(
-      JSON.stringify({ runningSummary: truncatedSummary }),
+      JSON.stringify({ 
+        runningSummary: truncatedSummary,
+        summary: truncatedSummary, // alias for client compatibility
+        updatedAt
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    console.error('[update-visit-summary] Error:', error);
+    console.error('[update-visit-summary] Unhandled error:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Unknown server error',
+        stack: error instanceof Error ? error.stack?.slice(0, 300) : undefined
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

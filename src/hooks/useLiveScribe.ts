@@ -296,13 +296,14 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     }
   }, [mergeBuffers, downsample, float32ToInt16, processAudioChunk, onTranscriptUpdate, onError]);
 
-  // Update running summary (Option B only)
-  const updateRunningSummary = useCallback(async () => {
+  // Update running summary (Option B only) - with retry on transient errors
+  const updateRunningSummary = useCallback(async (retryCount = 0) => {
     const fullTranscript = accumulatedTranscriptRef.current;
     const transcriptDelta = fullTranscript.slice(lastSummaryTranscriptLengthRef.current);
     
-    if (!transcriptDelta.trim()) {
-      console.log('[LiveScribe] No new transcript delta for summary, skipping');
+    // Skip if no meaningful delta (at least 50 chars of new content)
+    if (!transcriptDelta.trim() || transcriptDelta.trim().length < 50) {
+      console.log('[LiveScribe] No meaningful transcript delta for summary, skipping. Delta length:', transcriptDelta.length);
       return;
     }
 
@@ -314,7 +315,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     }));
 
     try {
-      console.log('[LiveScribe] Updating running summary, delta length:', transcriptDelta.length);
+      console.log('[LiveScribe] Updating running summary, delta length:', transcriptDelta.length, 'retry:', retryCount);
       
       const { data, error: fnError } = await supabase.functions.invoke('update-visit-summary', {
         body: {
@@ -325,28 +326,60 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       });
 
       if (fnError) {
+        const errorMsg = fnError.message || 'Summary update failed';
         console.error('[LiveScribe] Summary update error:', fnError);
+        
+        // Retry once on transient errors (504, 502, 500)
+        if (retryCount === 0 && /timeout|502|504|500/i.test(errorMsg)) {
+          console.log('[LiveScribe] Retrying summary update after transient error...');
+          setTimeout(() => updateRunningSummary(1), 2000);
+          return;
+        }
+        
         setDebugInfo(prev => ({
           ...prev,
-          lastSummaryError: fnError.message || 'Summary update failed',
+          lastSummaryError: errorMsg,
+        }));
+        // Don't throw - continue transcription without blocking
+        return;
+      }
+
+      // Handle error responses from the function
+      if (data?.error) {
+        console.error('[LiveScribe] Summary function returned error:', data.error);
+        setDebugInfo(prev => ({
+          ...prev,
+          lastSummaryError: data.error,
         }));
         return;
       }
 
-      if (data?.runningSummary) {
-        currentRunningSummaryRef.current = data.runningSummary;
-        setRunningSummary(data.runningSummary);
-        onSummaryUpdate?.(data.runningSummary);
+      const summary = data?.runningSummary || data?.summary;
+      if (summary) {
+        currentRunningSummaryRef.current = summary;
+        setRunningSummary(summary);
+        onSummaryUpdate?.(summary);
         lastSummaryTranscriptLengthRef.current = fullTranscript.length;
-        console.log('[LiveScribe] Summary updated successfully');
+        console.log('[LiveScribe] Summary updated successfully, length:', summary.length);
+      } else {
+        console.warn('[LiveScribe] No summary in response:', Object.keys(data || {}));
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('[LiveScribe] Summary update failed:', err);
+      
+      // Retry once on network errors
+      if (retryCount === 0) {
+        console.log('[LiveScribe] Retrying summary update after error...');
+        setTimeout(() => updateRunningSummary(1), 2000);
+        return;
+      }
+      
       setDebugInfo(prev => ({
         ...prev,
         lastSummaryError: errMsg,
       }));
+      // Don't throw - continue transcription without blocking
     }
   }, [preferences, onSummaryUpdate]);
 
@@ -428,9 +461,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         sendCurrentChunks();
       }, chunkIntervalMs);
 
-      // Set up summary interval for Option B (every 75 seconds)
+      // Set up summary interval for Option B (every 30 seconds, configurable)
       if (liveDraftMode === 'B') {
+        const summaryIntervalMs = 30000; // 30 seconds - can be made configurable
+        console.log(`[LiveScribe] Setting up summary interval: ${summaryIntervalMs}ms`);
         summaryIntervalRef.current = setInterval(() => {
+          // Only call if we have meaningful new content (50+ chars since last summary)
           if (accumulatedTranscriptRef.current.length > lastSummaryTranscriptLengthRef.current + 50) {
             updateRunningSummary();
           }
