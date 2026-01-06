@@ -16,6 +16,19 @@ import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences } from '@
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
+// Format recording time as mm:ss or hh:mm:ss if over 1 hour
+function formatRecordingTime(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  
+  if (hours > 0) {
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
 interface SoapData {
   subjective: string;
   objective: string;
@@ -500,6 +513,14 @@ const AppHome = () => {
                 Live Scribe (Fast Mode)
               </CardTitle>
               <div className="flex items-center gap-2">
+                {/* Timer display - always visible to prevent layout shift */}
+                <span className={`text-sm font-mono tabular-nums ${
+                  liveScribe.status === 'recording' ? 'text-red-600 dark:text-red-400' :
+                  liveScribe.status === 'finalizing' ? 'text-amber-600 dark:text-amber-400' :
+                  'text-muted-foreground'
+                }`}>
+                  {formatRecordingTime(liveScribe.recordingElapsedMs)}
+                </span>
                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                   liveScribe.status === 'idle' ? 'bg-muted text-muted-foreground' :
                   liveScribe.status === 'recording' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 animate-pulse' :
@@ -509,7 +530,7 @@ const AppHome = () => {
                 }`}>
                   {liveScribe.status === 'idle' && 'Idle'}
                   {liveScribe.status === 'recording' && '● Recording'}
-                  {liveScribe.status === 'finalizing' && 'Finalizing...'}
+                  {liveScribe.status === 'finalizing' && 'Finalizing'}
                   {liveScribe.status === 'done' && 'Done'}
                   {liveScribe.status === 'error' && 'Error'}
                 </span>
