@@ -44,6 +44,8 @@ interface Preferences {
   assessmentProblemList: boolean;
   includeFollowUpLine: boolean;
   noteEditorMode: 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
+  patientFirstName: string;
+  clinicianDisplayName: string;
 }
 
 const validatePreferences = (prefs: any): Preferences => {
@@ -65,6 +67,8 @@ const validatePreferences = (prefs: any): Preferences => {
     noteEditorMode: ['SOAP_4_FIELD', 'SOAP_3_FIELD'].includes(prefs?.noteEditorMode)
       ? prefs.noteEditorMode
       : 'SOAP_4_FIELD',
+    patientFirstName: typeof prefs?.patientFirstName === 'string' ? prefs.patientFirstName.trim() : '',
+    clinicianDisplayName: typeof prefs?.clinicianDisplayName === 'string' ? prefs.clinicianDisplayName.trim() : '',
   };
 };
 
@@ -159,7 +163,17 @@ ${preferenceInstructions}
    - Use active voice.
    ${prefs.includeFollowUpLine ? '- End with follow-up timing if mentioned, otherwise "Follow up as needed."' : ''}
 
-5. You must output ONLY valid JSON matching this exact structure:
+5. PATIENT INSTRUCTIONS (patientInstructions):
+   - Write a friendly, plain-language letter to the patient summarizing what was discussed.
+   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
+   - Use simple non-medical language whenever possible.
+   - End with a closing and clinician signature:
+     "Sincerely,
+     ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}"
+   - Do NOT sign with the patient's name anywhere.
+
+6. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
     "subjective": "string",
@@ -167,10 +181,11 @@ ${preferenceInstructions}
     "assessment": "string",
     "plan": "string"
   },
+  "patientInstructions": "string - friendly letter to patient",
   "markdown": "formatted markdown note with ## headers for each section"
 }
 
-6. The markdown field should be a nicely formatted clinical note with:
+7. The markdown field should be a nicely formatted clinical note with:
    ## Subjective
    [content]
    
@@ -225,9 +240,19 @@ ${preferenceInstructions}
    - If only ONE problem exists, still format the same way with one entry.
    - Do NOT merge multiple problems into one generic plan.
    - BAD: "I am assessing the patient for..."
-   - GOOD: "Problem 1: Hypertension, uncontrolled\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"
+    - GOOD: "Problem 1: Hypertension, uncontrolled\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"
 
-4. You must output ONLY valid JSON matching this exact structure:
+4. PATIENT INSTRUCTIONS (patientInstructions):
+   - Write a friendly, plain-language letter to the patient summarizing what was discussed.
+   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
+   - Use simple non-medical language whenever possible.
+   - End with a closing and clinician signature:
+     "Sincerely,
+     ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}"
+   - Do NOT sign with the patient's name anywhere.
+
+5. You must output ONLY valid JSON matching this exact structure:
 {
   "soap3": {
     "subjective": "string",
@@ -241,10 +266,11 @@ ${preferenceInstructions}
       "plan": ["string - plan item 1", "string - plan item 2"]
     }
   ],
+  "patientInstructions": "string - friendly letter to patient",
   "markdown": "formatted markdown note with ## headers"
 }
 
-5. The markdown field should be:
+6. The markdown field should be:
    ## Subjective
    [content]
    
@@ -290,7 +316,17 @@ ${preferenceInstructions}
    ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
    ${prefs.includeFollowUpLine ? '- If follow-up timing not stated, end with "Follow up as needed."' : '- Only include follow-up if explicitly stated in transcript.'}
 
-6. You must output ONLY valid JSON matching this exact structure:
+6. PATIENT INSTRUCTIONS (patientInstructions):
+   - Write a friendly, plain-language letter to the patient summarizing what was discussed.
+   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
+   - Use simple non-medical language whenever possible.
+   - End with a closing and clinician signature:
+     "Sincerely,
+     ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}"
+   - Do NOT sign with the patient's name anywhere.
+
+7. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
     "subjective": "string - full subjective content (problem-oriented format)",
@@ -298,10 +334,11 @@ ${preferenceInstructions}
     "assessment": "string - problem list or clinical narrative",
     "plan": "string - plan items"
   },
+  "patientInstructions": "string - friendly letter to patient",
   "markdown": "formatted problem-oriented markdown note"
 }
 
-7. The markdown field should be formatted as:
+8. The markdown field should be formatted as:
    ## Subjective
    [problem-oriented subjective content - use ### Problem Name headers if multiple problems]
    
@@ -354,7 +391,17 @@ ${preferenceInstructions}
    - If only ONE problem exists, still format the same way.
    ${prefs.includeFollowUpLine ? '- End each problem\'s plan with follow-up if stated, or add "Follow up as needed." for last problem.' : '- Only include follow-up if explicitly stated in transcript.'}
 
-5. You must output ONLY valid JSON matching this exact structure:
+5. PATIENT INSTRUCTIONS (patientInstructions):
+   - Write a friendly, plain-language letter to the patient summarizing what was discussed.
+   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
+   - Use simple non-medical language whenever possible.
+   - End with a closing and clinician signature:
+     "Sincerely,
+     ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}"
+   - Do NOT sign with the patient's name anywhere.
+
+6. You must output ONLY valid JSON matching this exact structure:
 {
   "soap3": {
     "subjective": "string - problem-oriented subjective",
@@ -368,10 +415,11 @@ ${preferenceInstructions}
       "plan": ["string", "string"]
     }
   ],
+  "patientInstructions": "string - friendly letter to patient",
   "markdown": "formatted problem-oriented markdown note"
 }
 
-6. The markdown field should be:
+7. The markdown field should be:
    ## Subjective
    [problem-oriented content]
    
@@ -635,13 +683,17 @@ Remember:
         const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
           `## Subjective\n${soap.subjective}\n\n## Objective\n${soap.objective}\n\n## Assessment\n${soap.assessment}\n\n## Plan\n${soap.plan}`;
 
+        // Extract patient instructions
+        const patientInstructions = typeof parsed.patientInstructions === 'string' ? parsed.patientInstructions : '';
+
         console.log('[generate-note] SOAP_4_FIELD note generated successfully');
 
         return new Response(JSON.stringify({ 
           noteType: 'SOAP_4_FIELD',
           note: markdown,
           markdown: markdown,
-          soap: soap // Contains: subjective, objective, assessment, plan
+          soap: soap, // Contains: subjective, objective, assessment, plan
+          patientInstructions
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -687,6 +739,9 @@ Remember:
       const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
         `## Subjective\n${soap3.subjective}\n\n## Objective\n${soap3.objective}\n\n## Assessment & Plan\n${soap3.assessmentPlan}`;
 
+      // Extract patient instructions
+      const patientInstructions = typeof parsed.patientInstructions === 'string' ? parsed.patientInstructions : '';
+
       console.log('[generate-note] SOAP_3_FIELD note generated successfully with', validatedAp.length, 'problems');
 
       return new Response(JSON.stringify({ 
@@ -694,7 +749,8 @@ Remember:
         note: markdown,
         markdown: markdown,
         soap3: soap3, // Contains: subjective, objective, assessmentPlan
-        ap: validatedAp
+        ap: validatedAp,
+        patientInstructions
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

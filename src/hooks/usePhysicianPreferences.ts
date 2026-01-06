@@ -12,6 +12,8 @@ export interface PhysicianPreferences {
   assessmentProblemList: boolean;
   includeFollowUpLine: boolean;
   noteEditorMode: NoteEditorMode;
+  patientFirstName: string;
+  clinicianDisplayName: string;
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
@@ -27,6 +29,8 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   assessmentProblemList: true,
   includeFollowUpLine: true,
   noteEditorMode: 'SOAP_4_FIELD',
+  patientFirstName: '',
+  clinicianDisplayName: '',
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -54,6 +58,8 @@ const loadPreferences = (): PhysicianPreferences => {
         noteEditorMode: ['SOAP_4_FIELD', 'SOAP_3_FIELD'].includes(parsed.noteEditorMode)
           ? parsed.noteEditorMode
           : 'SOAP_4_FIELD',
+        patientFirstName: typeof parsed.patientFirstName === 'string' ? parsed.patientFirstName : '',
+        clinicianDisplayName: typeof parsed.clinicianDisplayName === 'string' ? parsed.clinicianDisplayName : '',
       };
     }
   } catch (e) {

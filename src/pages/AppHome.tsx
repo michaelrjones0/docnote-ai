@@ -105,6 +105,8 @@ const AppHome = () => {
     getCurrentMarkdown,
     getExportJson,
     getCurrentNoteType,
+    getPatientInstructions,
+    editPatientInstructions,
   } = useDocNoteSession();
 
   // Live Scribe
@@ -343,6 +345,7 @@ const AppHome = () => {
           noteType: 'SOAP_4_FIELD',
           soap: data.soap,
           markdown: data.markdown || data.note || '',
+          patientInstructions: data.patientInstructions || '',
         }, expectedMode);
         toast({
           title: 'SOAP note generated',
@@ -358,6 +361,7 @@ const AppHome = () => {
           soap3: data.soap3,
           ap: data.ap || [],
           markdown: data.markdown || data.note || '',
+          patientInstructions: data.patientInstructions || '',
         }, expectedMode);
         toast({
           title: 'SOAP note generated',
@@ -1022,6 +1026,33 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                   />
                 </div>
               </div>
+
+              {/* Patient Instructions Settings */}
+              <div className="mt-4 pt-4 border-t border-border">
+                <Label className="text-sm font-medium mb-3 block">Patient Instructions Settings</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="patientFirstName" className="text-sm">Patient First Name (for greeting)</Label>
+                    <Input
+                      id="patientFirstName"
+                      value={preferences.patientFirstName}
+                      onChange={(e) => setPreferences({ patientFirstName: e.target.value })}
+                      placeholder="e.g., John"
+                      className="text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="clinicianDisplayName" className="text-sm">Clinician Name (for signature)</Label>
+                    <Input
+                      id="clinicianDisplayName"
+                      value={preferences.clinicianDisplayName}
+                      onChange={(e) => setPreferences({ clinicianDisplayName: e.target.value })}
+                      placeholder="e.g., Dr. Jane Smith"
+                      className="text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
               
               {/* Custom Style Instructions */}
               <div className="mt-4 space-y-2">
@@ -1368,6 +1399,34 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             )}
           </CardContent>
         </Card>
+
+        {/* Patient Instructions Section */}
+        {hasNote && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Patient Instructions</CardTitle>
+                <SectionCopyButton text={getPatientInstructions()} sectionName="Patient Instructions" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="border rounded-lg p-4 bg-card">
+                <AutoResizeTextarea
+                  id="patient-instructions"
+                  value={getPatientInstructions()}
+                  onChange={(e) => editPatientInstructions(e.target.value)}
+                  placeholder="Patient instructions will be generated here. This is a plain-language letter summarizing the visit for the patient."
+                  className="min-h-[120px]"
+                />
+              </div>
+              {!getPatientInstructions() && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Patient instructions will be generated when you click "Generate SOAP".
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Transcript Section */}
         <Card>
