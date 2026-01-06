@@ -509,14 +509,14 @@ serve(async (req) => {
     try {
       awsConfig = getAwsConfig();
     } catch (configError) {
-      console.error('AWS config error:', configError);
+      console.error('[transcribe-audio-live] AWS config error');
       return new Response(
         JSON.stringify({ error: 'Server configuration error', code: 'CONFIG_ERROR' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`[${authResult.userId}] Processing live audio chunk ${chunkIndex ?? 'N/A'}, encoding: ${encoding}, sampleRate: ${sampleRate}...`);
+    // SECURITY: Do not log userId or audio data sizes
 
     // Decode base64 audio
     const binaryString = atob(audio);
@@ -525,28 +525,23 @@ serve(async (req) => {
       pcmData[i] = binaryString.charCodeAt(i);
     }
 
-    console.log(`Received ${pcmData.length} bytes of PCM data`);
-
     // Create WAV file from PCM data
     const wavHeader = createWavHeader(pcmData.length, sampleRate, 1, 16);
     const wavData = new Uint8Array(wavHeader.length + pcmData.length);
     wavData.set(wavHeader, 0);
     wavData.set(pcmData, wavHeader.length);
 
-    console.log(`Created WAV file: ${wavData.length} bytes (header: ${wavHeader.length}, data: ${pcmData.length})`);
-
     const timestamp = Date.now();
     const chunkId = crypto.randomUUID().slice(0, 8);
     const jobName = `medical-live-${timestamp}-${chunkId}`;
     const s3Key = `${awsConfig.s3Prefix}live/${jobName}.wav`;
 
-    console.log('Uploading WAV to S3...');
+    // SECURITY: Do not log S3 keys or job names
     await uploadToS3(
       wavData, awsConfig.s3Bucket, s3Key, 'audio/wav',
       awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
     );
 
-    console.log('Starting medical transcription job:', jobName);
     await startMedicalTranscriptionJob(
       jobName, 
       `s3://${awsConfig.s3Bucket}/${s3Key}`, 
@@ -571,12 +566,11 @@ serve(async (req) => {
         jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
       );
       
-      console.log(`Job ${jobName} status: ${jobStatus.status} (attempt ${attempt + 1})`);
+      // SECURITY: Do not log job status or attempt counts
       
       if (jobStatus.status === 'COMPLETED') {
         // Fetch transcript using signed S3 request instead of presigned URL
         const outputKey = `${awsConfig.s3Prefix}live-output/${jobName}.json`;
-        console.log(`Fetching transcript from S3: ${outputKey}`);
         
         try {
           const responseText = await fetchTranscriptFromS3(
@@ -592,23 +586,19 @@ serve(async (req) => {
           transcriptText = parsed.text;
           segments = parsed.segments;
         } catch (fetchError) {
-          console.error('Failed to fetch transcript from S3:', fetchError);
+          // SECURITY: Do not log error details
+          console.error('[transcribe-audio-live] Failed to fetch transcript from S3');
           return new Response(
-            JSON.stringify({ 
-              error: `Failed to fetch transcript: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`,
-              code: 'TRANSCRIPT_FETCH_ERROR'
-            }),
+            JSON.stringify({ error: 'Failed to fetch transcript', code: 'TRANSCRIPT_FETCH_ERROR' }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
         break;
       } else if (jobStatus.status === 'FAILED') {
-        console.error('Medical transcription job failed:', jobStatus.failureReason);
+        // SECURITY: Do not log failure reason
+        console.error('[transcribe-audio-live] Transcription job failed');
         return new Response(
-          JSON.stringify({ 
-            error: `Transcription failed: ${jobStatus.failureReason}`,
-            code: 'TRANSCRIPTION_FAILED'
-          }),
+          JSON.stringify({ error: 'Transcription failed', code: 'TRANSCRIPTION_FAILED' }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
@@ -617,10 +607,10 @@ serve(async (req) => {
     try {
       await deleteMedicalTranscriptionJob(jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region);
     } catch (cleanupError) {
-      console.warn('Cleanup warning:', cleanupError);
+      // SECURITY: Do not log cleanup errors
     }
 
-    console.log(`Live transcription completed: "${transcriptText.slice(0, 100)}", ${segments.length} segments`);
+    // SECURITY: Do not log transcript content
 
     return new Response(
       JSON.stringify({ 
@@ -633,13 +623,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    // Catch-all error handler - ALWAYS includes CORS headers
-    console.error('Error in transcribe-audio-live:', error);
+    // SECURITY: Do not log error details
+    console.error('[transcribe-audio-live] Internal error');
     return new Response(
-      JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown error',
-        code: 'INTERNAL_ERROR'
-      }),
+      JSON.stringify({ error: 'An unexpected error occurred', code: 'INTERNAL_ERROR' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

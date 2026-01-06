@@ -1,6 +1,8 @@
 /**
  * Shared authentication helper for edge functions.
  * Centralizes JWT verification - single source of truth.
+ * 
+ * SECURITY: No tokens, request bodies, headers, or PHI are logged.
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
@@ -29,6 +31,8 @@ export async function requireUser(
   const authHeader = req.headers.get("Authorization");
   
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    // Log only that auth header is missing, not the header value
+    console.error("[auth] Missing or invalid Authorization header format");
     return {
       error: new Response(
         JSON.stringify({ error: "Unauthorized: missing or invalid Authorization header" }),
@@ -60,7 +64,7 @@ export async function requireUser(
   const { data: { user }, error } = await supabase.auth.getUser(token);
 
   if (error || !user) {
-    // Log only that auth failed, not the token or any PHI
+    // Log only that auth failed, not the token, error details, or any PHI
     console.error("[auth] JWT verification failed");
     return {
       error: new Response(
@@ -70,6 +74,7 @@ export async function requireUser(
     };
   }
 
+  // SECURITY: Do not log userId - just confirm success
   return { userId: user.id };
 }
 

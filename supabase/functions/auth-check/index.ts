@@ -1,3 +1,8 @@
+/**
+ * Auth-check edge function - diagnostic endpoint for connectivity testing.
+ * 
+ * SECURITY: No tokens, headers, or user data are logged.
+ */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getCorsHeaders } from "../_shared/env.ts";
 
@@ -38,23 +43,22 @@ Deno.serve(async (req) => {
     const { data, error } = await supabase.auth.getClaims(token);
 
     if (error || !data?.claims) {
-      console.error('JWT verification failed:', error?.message);
+      // SECURITY: Do not log error details or token
+      console.error('[auth-check] JWT verification failed');
       return new Response(
         JSON.stringify({ ok: false, error: 'Invalid token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const userId = data.claims.sub;
-    console.log('JWT verified for user:', userId);
-
+    // SECURITY: Do not log userId
     return new Response(
-      JSON.stringify({ ok: true, userId }),
+      JSON.stringify({ ok: true }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    console.error('Auth check error:', err);
-    // Re-derive CORS for catch block
+    // SECURITY: Do not log error details
+    console.error('[auth-check] Internal error');
     const origin = req.headers.get('Origin');
     const { headers: catchCorsHeaders } = getCorsHeaders(origin);
     return new Response(

@@ -294,7 +294,7 @@ serve(async (req) => {
     // Get validated AWS configuration
     const awsConfig = getAwsConfig();
 
-    console.log(`[${authResult.userId}] Starting batch medical transcription (${mimeType})...`);
+    // SECURITY: Do not log userId or MIME types
 
     const binaryAudio = processBase64Chunks(audio);
     
@@ -302,7 +302,7 @@ serve(async (req) => {
     const fileExtension = mediaFormat;
     const audioKey = `${awsConfig.s3Prefix}batch/${encounterId || 'unknown'}/${timestamp}-audio.${fileExtension}`;
     
-    console.log(`Uploading audio to S3 with encryption: ${audioKey}`);
+    // SECURITY: Do not log S3 keys
     await uploadToS3(
       binaryAudio,
       awsConfig.s3Bucket,
@@ -312,12 +312,11 @@ serve(async (req) => {
       awsConfig.secretAccessKey,
       awsConfig.region
     );
-    console.log('Audio uploaded to S3 successfully');
 
     const jobName = `medical-batch-${encounterId || 'unknown'}-${timestamp}`;
     const s3Uri = `s3://${awsConfig.s3Bucket}/${audioKey}`;
     
-    console.log(`Starting medical transcription job: ${jobName}`);
+    // SECURITY: Do not log job names
     await startMedicalTranscriptionJob(
       jobName,
       s3Uri,
@@ -329,7 +328,6 @@ serve(async (req) => {
       awsConfig.secretAccessKey,
       awsConfig.region
     );
-    console.log('Medical transcription job started - returning jobName for async polling');
 
     // Return immediately with jobName - client should poll transcribe-audio-batch-status
     return new Response(
@@ -342,9 +340,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in transcribe-audio-batch:', error);
+    // SECURITY: Do not log error details
+    console.error('[transcribe-audio-batch] Internal error');
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ error: 'An unexpected error occurred' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
