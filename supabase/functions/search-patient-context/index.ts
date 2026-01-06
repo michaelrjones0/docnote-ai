@@ -41,9 +41,7 @@ serve(async (req) => {
       );
     }
 
-    console.log('Searching patient context...');
-    console.log('Chief complaint:', currentChiefComplaint);
-    console.log('Chronic conditions:', chronicConditions?.length || 0);
+    // SECURITY: Do not log chief complaint or clinical data
 
     // Build the context for AI analysis
     const notesContext = patientNotes?.map((note: any, index: number) => `
@@ -98,8 +96,8 @@ Format your response in clear sections with markdown headers.`;
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('AI gateway error:', response.status, errorText);
+      // SECURITY: Log only status code, not error body which may contain PHI
+      console.error('[search-patient-context] AI gateway error:', response.status);
       
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: 'Rate limit exceeded.' }), {
@@ -116,7 +114,7 @@ Format your response in clear sections with markdown headers.`;
     const data = await response.json();
     const analysis = data.choices?.[0]?.message?.content;
 
-    console.log('Context search completed');
+    // SECURITY: Do not log analysis content
 
     return new Response(JSON.stringify({ 
       analysis,
@@ -126,13 +124,11 @@ Format your response in clear sections with markdown headers.`;
     });
 
   } catch (error) {
-    console.error('Error in search-patient-context:', error);
-    // Re-derive CORS for catch block
+    // SECURITY: Do not log error details
+    console.error('[search-patient-context] Internal error');
     const origin = req.headers.get('Origin');
     const { headers: catchCorsHeaders } = getCorsHeaders(origin);
-    return new Response(JSON.stringify({ 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    }), {
+    return new Response(JSON.stringify({ error: 'An unexpected error occurred' }), {
       status: 500,
       headers: { ...catchCorsHeaders, 'Content-Type': 'application/json' },
     });

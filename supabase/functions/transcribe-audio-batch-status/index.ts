@@ -272,7 +272,7 @@ serve(async (req) => {
     // Get validated AWS configuration
     const awsConfig = getAwsConfig();
 
-    console.log(`[${authResult.userId}] Checking batch job status: ${jobName}`);
+    // SECURITY: Do not log userId or job names
 
     const jobStatus = await getMedicalTranscriptionJobStatus(
       jobName,
@@ -281,7 +281,7 @@ serve(async (req) => {
       awsConfig.region
     );
 
-    console.log(`Job ${jobName} status: ${jobStatus.status}`);
+    // SECURITY: Do not log job status
 
     if (jobStatus.status === 'COMPLETED') {
       // Fetch transcript from S3 using SigV4-signed GetObject request
@@ -290,7 +290,7 @@ serve(async (req) => {
       const s3Key = `transcribe/batch-output/${jobName}.json`;
       const s3Url = `https://${s3Bucket}.s3.${s3Region}.amazonaws.com/${s3Key}`;
 
-      console.log(`Fetching transcript from S3: ${s3Key}`);
+      // SECURITY: Do not log S3 paths
 
       const s3Headers = await signRequest(
         'GET',
@@ -378,9 +378,10 @@ serve(async (req) => {
     }
 
   } catch (error) {
-    console.error('Error in transcribe-audio-batch-status:', error);
+    // SECURITY: Do not log error details
+    console.error('[transcribe-audio-batch-status] Internal error');
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ error: 'An unexpected error occurred' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

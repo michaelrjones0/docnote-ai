@@ -245,7 +245,7 @@ serve(async (req) => {
 
   // Block requests from disallowed origins
   if (!originAllowed) {
-    console.warn(`Blocked request from disallowed origin: ${origin}`);
+    console.warn('[start-batch-latest] Blocked disallowed origin');
     return new Response(
       JSON.stringify({ ok: false, error: 'Origin not allowed' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -262,7 +262,7 @@ serve(async (req) => {
     // Get validated AWS configuration
     const awsConfig = getAwsConfig();
     
-    console.log(`[${authResult.userId}] Listing S3 objects in ${awsConfig.s3Bucket}/${awsConfig.s3Prefix}...`);
+    // SECURITY: Do not log userId or S3 paths
 
     // List objects in S3
     const objects = await listS3Objects(
@@ -273,15 +273,13 @@ serve(async (req) => {
       awsConfig.region
     );
 
-    console.log(`Found ${objects.length} total objects in S3`);
+    // SECURITY: Do not log object counts or file paths
 
     // Filter for audio files only
     const audioFiles = objects.filter(obj => {
       const ext = obj.Key.split('.').pop()?.toLowerCase() || '';
       return AUDIO_EXTENSIONS.includes(ext);
     });
-
-    console.log(`Found ${audioFiles.length} audio files`);
 
     if (audioFiles.length === 0) {
       return new Response(
@@ -298,7 +296,7 @@ serve(async (req) => {
     audioFiles.sort((a, b) => new Date(b.LastModified).getTime() - new Date(a.LastModified).getTime());
     const latestFile = audioFiles[0];
     
-    console.log(`Most recent audio file: ${latestFile.Key} (${latestFile.LastModified})`);
+    // SECURITY: Do not log file paths
 
     // Get media format from extension
     const ext = latestFile.Key.split('.').pop()?.toLowerCase() || '';
@@ -315,7 +313,7 @@ serve(async (req) => {
     const jobName = `batch-${Date.now()}`;
     const s3Uri = `s3://${awsConfig.s3Bucket}/${latestFile.Key}`;
     
-    console.log(`Starting transcription job: ${jobName} for ${s3Uri}`);
+    // SECURITY: Do not log S3 URIs or job names
     
     await startMedicalTranscriptionJob(
       jobName,
@@ -329,7 +327,7 @@ serve(async (req) => {
       awsConfig.region
     );
 
-    console.log(`Transcription job started successfully: ${jobName}`);
+    // SECURITY: Do not log job name
 
     return new Response(
       JSON.stringify({ 
@@ -342,9 +340,10 @@ serve(async (req) => {
     );
 
   } catch (error) {
-    console.error('Error in start-batch-latest:', error);
+    // SECURITY: Do not log error details
+    console.error('[start-batch-latest] Internal error');
     return new Response(
-      JSON.stringify({ ok: false, error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ ok: false, error: 'An unexpected error occurred' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

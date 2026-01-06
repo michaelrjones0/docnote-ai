@@ -62,29 +62,16 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    
-    // Log received request keys for debugging
-    console.log('[update-visit-summary] Request received:', {
-      keys: Object.keys(body),
-      timestamp: new Date().toISOString(),
-    });
-    
     const { transcriptDelta, runningSummary, preferences } = body;
     
-    console.log('[update-visit-summary] Payload details:', {
-      transcriptDeltaLength: transcriptDelta?.length ?? 0,
-      runningSummaryLength: runningSummary?.length ?? 0,
-      hasPreferences: !!preferences,
-    });
+    // SECURITY: Log only operational metadata, never PHI content
+    console.log('[update-visit-summary] Request received');
 
     // Validate transcriptDelta
     if (!transcriptDelta || typeof transcriptDelta !== 'string' || !transcriptDelta.trim()) {
-      console.error('[update-visit-summary] Invalid transcriptDelta:', typeof transcriptDelta, transcriptDelta?.length);
+      console.error('[update-visit-summary] Invalid transcriptDelta');
       return new Response(
-        JSON.stringify({ 
-          error: 'transcriptDelta is required and must be a non-empty string',
-          received: { type: typeof transcriptDelta, length: transcriptDelta?.length }
-        }),
+        JSON.stringify({ error: 'transcriptDelta is required and must be a non-empty string' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -92,16 +79,9 @@ serve(async (req) => {
     // Use OpenAI API directly
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) {
-      console.error('[update-visit-summary] OPENAI_API_KEY not found in environment');
-      return buildErrorResponse(
-        'AI API key not configured',
-        500,
-        corsHeaders,
-        { message: 'OPENAI_API_KEY is missing from environment variables' }
-      );
+      console.error('[update-visit-summary] OPENAI_API_KEY not configured');
+      return buildErrorResponse('AI API key not configured', 500, corsHeaders);
     }
-    
-    console.log('[update-visit-summary] OPENAI_API_KEY present, length:', OPENAI_API_KEY.length);
 
     // Build the voice instruction
     const voiceInstruction = preferences?.firstPerson === true
@@ -138,10 +118,7 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
       ? `Previous summary:\n${runningSummary}\n\nNew transcript chunk:\n${transcriptDelta}`
       : `New transcript chunk:\n${transcriptDelta}`;
 
-    console.log('[update-visit-summary] Calling OpenAI API:', {
-      model: 'gpt-4o-mini',
-      transcriptDeltaLength: transcriptDelta.length,
-    });
+    // SECURITY: Do not log transcript content or length
 
     // Create abort controller for timeout
     const controller = new AbortController();
@@ -169,90 +146,38 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-        console.error('[update-visit-summary] OpenAI timeout after', AI_TIMEOUT_MS, 'ms');
-        return buildErrorResponse(
-          'AI request timed out, please try again',
-          504,
-          corsHeaders,
-          { message: 'Request timed out after 30 seconds' }
-        );
+        console.error('[update-visit-summary] OpenAI timeout');
+        return buildErrorResponse('AI request timed out, please try again', 504, corsHeaders);
       }
-      // Log full fetch error server-side
-      console.error('[update-visit-summary] Fetch error:', {
-        message: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error',
-        stack: fetchError instanceof Error ? fetchError.stack : undefined,
-      });
+      // SECURITY: Do not log error details
+      console.error('[update-visit-summary] Fetch error');
       throw fetchError;
     } finally {
       clearTimeout(timeoutId);
     }
 
-    console.log('[update-visit-summary] OpenAI response status:', aiResponse.status);
-
     if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      // Always log full error server-side
-      console.error('[update-visit-summary] OpenAI API error:', {
-        status: aiResponse.status,
-        statusText: aiResponse.statusText,
-        errorBody: errorText,
-      });
+      // SECURITY: Log only status code, not error body which may contain PHI
+      console.error('[update-visit-summary] OpenAI API error:', aiResponse.status);
       
-      // Handle rate limiting
       if (aiResponse.status === 429) {
-        return buildErrorResponse(
-          'Rate limit exceeded, please try again later',
-          429,
-          corsHeaders,
-          { details: errorText }
-        );
+        return buildErrorResponse('Rate limit exceeded, please try again later', 429, corsHeaders);
       }
-      
-      // Handle auth errors
       if (aiResponse.status === 401) {
-        return buildErrorResponse(
-          'AI authentication failed',
-          500,
-          corsHeaders,
-          { message: 'OpenAI API key is invalid', details: errorText }
-        );
+        return buildErrorResponse('AI authentication failed', 500, corsHeaders);
       }
-      
-      // Handle quota exceeded
       if (aiResponse.status === 402 || aiResponse.status === 403) {
-        return buildErrorResponse(
-          'AI quota exceeded or access denied',
-          402,
-          corsHeaders,
-          { details: errorText }
-        );
+        return buildErrorResponse('AI quota exceeded or access denied', 402, corsHeaders);
       }
-      
-      return buildErrorResponse(
-        'Failed to generate summary',
-        500,
-        corsHeaders,
-        { message: `OpenAI API error: ${aiResponse.status}`, details: errorText }
-      );
+      return buildErrorResponse('Failed to generate summary', 500, corsHeaders);
     }
 
     const aiData = await aiResponse.json();
-    console.log('[update-visit-summary] OpenAI response received:', {
-      choices: aiData.choices?.length,
-      usage: aiData.usage,
-    });
-    
     const newSummary = aiData.choices?.[0]?.message?.content?.trim() || '';
 
     if (!newSummary) {
-      const aiDataStr = JSON.stringify(aiData).slice(0, 1000);
-      console.error('[update-visit-summary] Empty summary from OpenAI. Full response:', aiDataStr);
-      return buildErrorResponse(
-        'AI returned empty summary',
-        500,
-        corsHeaders,
-        { message: 'No content in OpenAI response', details: aiDataStr }
-      );
+      console.error('[update-visit-summary] Empty summary from OpenAI');
+      return buildErrorResponse('AI returned empty summary', 500, corsHeaders);
     }
 
     // Enforce max length
@@ -261,7 +186,7 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
       : newSummary;
 
     const updatedAt = new Date().toISOString();
-    console.log('[update-visit-summary] Success! Summary length:', truncatedSummary.length);
+    // SECURITY: Do not log summary content or length
 
     return new Response(
       JSON.stringify({ 
@@ -273,24 +198,11 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
     );
 
   } catch (error) {
-    // Always log full error server-side
-    console.error('[update-visit-summary] Unhandled error:', {
-      message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined,
-      error,
-    });
+    // SECURITY: Log only that error occurred, not details
+    console.error('[update-visit-summary] Unhandled error');
     
-    // Re-derive CORS for catch block
     const origin = req.headers.get('Origin');
     const { headers: catchCorsHeaders } = getCorsHeaders(origin);
-    return buildErrorResponse(
-      'An unexpected error occurred',
-      500,
-      catchCorsHeaders,
-      {
-        message: error instanceof Error ? error.message : 'Unknown server error',
-        stack: error instanceof Error ? error.stack : undefined,
-      }
-    );
+    return buildErrorResponse('An unexpected error occurred', 500, catchCorsHeaders);
   }
 });
