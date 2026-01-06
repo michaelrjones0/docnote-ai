@@ -34,6 +34,8 @@ const buildErrorResponse = (
   );
 };
 
+type PatientGender = 'male' | 'female' | 'other' | '';
+
 interface Preferences {
   noteStructure: 'SOAP' | 'Problem-Oriented';
   detailLevel: 'Brief' | 'Standard' | 'Detailed';
@@ -46,7 +48,22 @@ interface Preferences {
   noteEditorMode: 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
   patientFirstName: string;
   clinicianDisplayName: string;
+  patientName: string;
+  patientGender: PatientGender;
 }
+
+// Get pronoun set for consistent language
+const getPronounSet = (gender: PatientGender): { subject: string; object: string; possessive: string; reflexive: string } => {
+  switch (gender) {
+    case 'male':
+      return { subject: 'he', object: 'him', possessive: 'his', reflexive: 'himself' };
+    case 'female':
+      return { subject: 'she', object: 'her', possessive: 'her', reflexive: 'herself' };
+    case 'other':
+    default:
+      return { subject: 'they', object: 'them', possessive: 'their', reflexive: 'themselves' };
+  }
+};
 
 const validatePreferences = (prefs: any): Preferences => {
   return {
@@ -69,11 +86,20 @@ const validatePreferences = (prefs: any): Preferences => {
       : 'SOAP_4_FIELD',
     patientFirstName: typeof prefs?.patientFirstName === 'string' ? prefs.patientFirstName.trim() : '',
     clinicianDisplayName: typeof prefs?.clinicianDisplayName === 'string' ? prefs.clinicianDisplayName.trim() : '',
+    patientName: typeof prefs?.patientName === 'string' ? prefs.patientName.trim() : '',
+    patientGender: ['male', 'female', 'other'].includes(prefs?.patientGender) ? prefs.patientGender : '',
   };
 };
 
 const buildPreferenceInstructions = (prefs: Preferences): string => {
   const instructions: string[] = [];
+  const pronouns = getPronounSet(prefs.patientGender);
+
+  // Patient pronoun guidance
+  instructions.push(`PATIENT PRONOUNS: Use "${pronouns.subject}/${pronouns.object}/${pronouns.possessive}" pronouns consistently when referring to the patient.
+- Subject: ${pronouns.subject} (e.g., "${pronouns.subject} reports...")
+- Object: ${pronouns.object} (e.g., "advised ${pronouns.object} to...")
+- Possessive: ${pronouns.possessive} (e.g., "${pronouns.possessive} symptoms...")`);
 
   // Detail level
   if (prefs.detailLevel === 'Brief') {
@@ -165,7 +191,7 @@ ${preferenceInstructions}
 
 5. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.
-   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Start with a greeting: "${prefs.patientName ? `Hi ${prefs.patientName},` : 'Hi there,'}"
    - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
    - Use simple non-medical language whenever possible.
    - End with a closing and clinician signature:
@@ -244,7 +270,7 @@ ${preferenceInstructions}
 
 4. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.
-   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Start with a greeting: "${prefs.patientName ? `Hi ${prefs.patientName},` : 'Hi there,'}"
    - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
    - Use simple non-medical language whenever possible.
    - End with a closing and clinician signature:
@@ -318,7 +344,7 @@ ${preferenceInstructions}
 
 6. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.
-   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Start with a greeting: "${prefs.patientName ? `Hi ${prefs.patientName},` : 'Hi there,'}"
    - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
    - Use simple non-medical language whenever possible.
    - End with a closing and clinician signature:
@@ -393,7 +419,7 @@ ${preferenceInstructions}
 
 5. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.
-   - Start with a greeting: "${prefs.patientFirstName ? `Hi ${prefs.patientFirstName},` : 'Hi there,'}"
+   - Start with a greeting: "${prefs.patientName ? `Hi ${prefs.patientName},` : 'Hi there,'}"
    - Include: medications prescribed/adjusted, home care instructions, warning signs to watch for, follow-up timing, when to go to ER/urgent care.
    - Use simple non-medical language whenever possible.
    - End with a closing and clinician signature:

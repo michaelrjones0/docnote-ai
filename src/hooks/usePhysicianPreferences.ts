@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 export type NoteEditorMode = 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
+export type PatientGender = 'male' | 'female' | 'other';
 
 export interface PhysicianPreferences {
   noteStructure: 'SOAP' | 'Problem-Oriented';
@@ -14,10 +15,26 @@ export interface PhysicianPreferences {
   noteEditorMode: NoteEditorMode;
   patientFirstName: string;
   clinicianDisplayName: string;
+  // Required patient info for current encounter
+  patientName: string;
+  patientGender: PatientGender | '';
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
 const MAX_STYLE_TEXT_LENGTH = 600;
+
+// Helper to get pronouns based on gender
+export const getPronounSet = (gender: PatientGender | ''): { subject: string; object: string; possessive: string } => {
+  switch (gender) {
+    case 'male':
+      return { subject: 'he', object: 'him', possessive: 'his' };
+    case 'female':
+      return { subject: 'she', object: 'her', possessive: 'her' };
+    case 'other':
+    default:
+      return { subject: 'they', object: 'them', possessive: 'their' };
+  }
+};
 
 const getDefaultPreferences = (): PhysicianPreferences => ({
   noteStructure: 'SOAP',
@@ -31,6 +48,8 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   noteEditorMode: 'SOAP_4_FIELD',
   patientFirstName: '',
   clinicianDisplayName: '',
+  patientName: '',
+  patientGender: '',
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -60,6 +79,8 @@ const loadPreferences = (): PhysicianPreferences => {
           : 'SOAP_4_FIELD',
         patientFirstName: typeof parsed.patientFirstName === 'string' ? parsed.patientFirstName : '',
         clinicianDisplayName: typeof parsed.clinicianDisplayName === 'string' ? parsed.clinicianDisplayName : '',
+        patientName: typeof parsed.patientName === 'string' ? parsed.patientName : '',
+        patientGender: ['male', 'female', 'other'].includes(parsed.patientGender) ? parsed.patientGender : '',
       };
     }
   } catch (e) {
