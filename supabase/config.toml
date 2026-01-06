@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.auth-check]
 verify_jwt = false
+
+[functions.start-batch-latest]
+verify_jwt = false
