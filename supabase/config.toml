@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.edit-note-voice]
 verify_jwt = false
+
+[functions.auth-check]
+verify_jwt = false
