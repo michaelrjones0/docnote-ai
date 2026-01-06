@@ -1,13 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { getCorsHeaders } from "../_shared/env.ts";
 
 serve(async (req) => {
+  const origin = req.headers.get('Origin');
+  const { headers: corsHeaders, isAllowed } = getCorsHeaders(origin);
+
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // Block disallowed origins
+  if (!isAllowed) {
+    return new Response(
+      JSON.stringify({ error: 'Origin not allowed' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -19,7 +27,11 @@ serve(async (req) => {
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
+      console.error('[search-patient-context] LOVABLE_API_KEY not configured');
+      return new Response(
+        JSON.stringify({ error: 'AI API key not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     console.log('Searching patient context...');
@@ -88,7 +100,10 @@ Format your response in clear sections with markdown headers.`;
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      throw new Error(`AI gateway error: ${response.status}`);
+      return new Response(
+        JSON.stringify({ error: `AI gateway error: ${response.status}` }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     const data = await response.json();
@@ -105,11 +120,14 @@ Format your response in clear sections with markdown headers.`;
 
   } catch (error) {
     console.error('Error in search-patient-context:', error);
+    // Re-derive CORS for catch block
+    const origin = req.headers.get('Origin');
+    const { headers: catchCorsHeaders } = getCorsHeaders(origin);
     return new Response(JSON.stringify({ 
       error: error instanceof Error ? error.message : 'Unknown error' 
     }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      headers: { ...catchCorsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

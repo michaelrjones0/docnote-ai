@@ -1,15 +1,21 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+import { getCorsHeaders } from "../_shared/env.ts";
 
 Deno.serve(async (req) => {
+  const origin = req.headers.get('Origin');
+  const { headers: corsHeaders, isAllowed } = getCorsHeaders(origin);
+
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // Block disallowed origins
+  if (!isAllowed) {
+    return new Response(
+      JSON.stringify({ ok: false, error: 'Origin not allowed' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
   }
 
   try {
@@ -48,9 +54,12 @@ Deno.serve(async (req) => {
     );
   } catch (err) {
     console.error('Auth check error:', err);
+    // Re-derive CORS for catch block
+    const origin = req.headers.get('Origin');
+    const { headers: catchCorsHeaders } = getCorsHeaders(origin);
     return new Response(
       JSON.stringify({ ok: false, error: 'Internal server error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { ...catchCorsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
