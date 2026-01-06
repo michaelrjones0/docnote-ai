@@ -18,6 +18,8 @@ import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNot
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
+import { DictationProvider } from '@/contexts/DictationContext';
+import { GlobalDictationButton } from '@/components/GlobalDictationButton';
 
 // Format recording time as mm:ss or hh:mm:ss if over 1 hour
 function formatRecordingTime(ms: number): string {
@@ -606,30 +608,35 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
   const showModeSwitchBanner = hasNote && currentNoteType !== preferences.noteEditorMode;
 
   return (
-    <DemoModeGuard>
-      <DemoModeBanner />
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto space-y-6">
-          {/* Header */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-xl">DocNoteAI</CardTitle>
-                <div className="flex items-center gap-4">
-                  <ResetDemoAckButton />
-                  <span className="text-sm text-muted-foreground">{user.email}</span>
-                  <Button onClick={handleClearSession} variant="outline" size="sm">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Clear Session
-                  </Button>
-                  <Button onClick={handleLogout} variant="outline" size="sm">
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Log Out
-                  </Button>
+    <DictationProvider>
+      <DemoModeGuard>
+        <DemoModeBanner />
+        <div className="min-h-screen bg-background p-4">
+          <div className="max-w-4xl mx-auto space-y-6">
+            {/* Header */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <CardTitle className="text-xl">DocNoteAI</CardTitle>
+                    {/* Global Dictation Button */}
+                    <GlobalDictationButton />
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <ResetDemoAckButton />
+                    <span className="text-sm text-muted-foreground">{user.email}</span>
+                    <Button onClick={handleClearSession} variant="outline" size="sm">
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Clear Session
+                    </Button>
+                    <Button onClick={handleLogout} variant="outline" size="sm">
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Log Out
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </CardHeader>
-          </Card>
+              </CardHeader>
+            </Card>
 
         {/* Conflict Banner - now rendered inside SOAP Note section */}
 
@@ -1659,6 +1666,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
         </div>
       </div>
     </DemoModeGuard>
+    </DictationProvider>
   );
 };
 
