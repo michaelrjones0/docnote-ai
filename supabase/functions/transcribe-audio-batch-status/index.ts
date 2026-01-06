@@ -305,13 +305,50 @@ serve(async (req) => {
 
     console.log(`Job ${jobName} status: ${jobStatus.status}`);
 
-    if (jobStatus.status === 'COMPLETED' && jobStatus.transcriptUri) {
-      const transcriptResponse = await fetch(jobStatus.transcriptUri);
+    if (jobStatus.status === 'COMPLETED') {
+      // Fetch transcript from S3 using SigV4-signed GetObject request
+      const s3Bucket = 'apollohealth-transcription-us-west-2';
+      const s3Region = 'us-west-2';
+      const s3Key = `transcribe/batch-output/${jobName}.json`;
+      const s3Url = `https://${s3Bucket}.s3.${s3Region}.amazonaws.com/${s3Key}`;
+
+      console.log(`Fetching transcript from S3: ${s3Key}`);
+
+      const s3Headers = await signRequest(
+        'GET',
+        s3Url,
+        {},
+        '',
+        's3',
+        s3Region,
+        awsConfig.accessKeyId,
+        awsConfig.secretAccessKey
+      );
+
+      const transcriptResponse = await fetch(s3Url, {
+        method: 'GET',
+        headers: s3Headers,
+      });
+
       const responseStatus = transcriptResponse.status;
       const responseStatusText = transcriptResponse.statusText;
       const contentType = transcriptResponse.headers.get('content-type') || '';
       const raw = await transcriptResponse.text();
-      
+
+      // Handle 404 / not found
+      if (responseStatus === 404 || responseStatus === 403) {
+        return new Response(
+          JSON.stringify({ 
+            ok: false,
+            status: 'NOT_FOUND',
+            error: `Transcript file not found in S3: ${s3Key}`,
+            httpStatus: responseStatus,
+            httpStatusText: responseStatusText
+          }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       // Check if response is JSON
       const isJson = contentType.includes('application/json') || raw.trim().startsWith('{');
       
@@ -320,12 +357,12 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({ 
             ok: false,
-            error: 'Non-JSON response from AWS/S3',
+            error: 'Non-JSON response from S3',
             status: responseStatus,
             statusText: responseStatusText,
             contentType,
             rawSnippet: raw.slice(0, 500),
-            url: jobStatus.transcriptUri.replace(/\?.*$/, '?[REDACTED]') // Redact query params (contains signature)
+            url: s3Url
           }),
           { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
