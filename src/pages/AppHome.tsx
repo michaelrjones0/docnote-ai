@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause } from 'lucide-react';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
-import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences } from '@/hooks/usePhysicianPreferences';
+import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
@@ -603,6 +603,55 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Patient Info - Required before recording */}
+            <div className="p-4 rounded-lg border-2 border-primary/30 bg-primary/5 space-y-4">
+              <div className="flex items-center gap-2">
+                <Label className="text-sm font-medium">Patient Info</Label>
+                <span className="text-xs text-destructive font-medium">(Required)</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Patient Name */}
+                <div className="space-y-2">
+                  <Label htmlFor="patientName" className="text-sm">Patient Name</Label>
+                  <Input
+                    id="patientName"
+                    value={preferences.patientName}
+                    onChange={(e) => setPreferences({ patientName: e.target.value })}
+                    placeholder="e.g., John Smith"
+                    className={`text-sm ${!preferences.patientName.trim() ? 'border-destructive' : ''}`}
+                  />
+                  {!preferences.patientName.trim() && (
+                    <p className="text-xs text-destructive">Required</p>
+                  )}
+                </div>
+
+                {/* Patient Gender - Segmented Control */}
+                <div className="space-y-2">
+                  <Label className="text-sm">Patient Gender</Label>
+                  <div className="flex rounded-lg border overflow-hidden">
+                    {(['male', 'female', 'other'] as PatientGender[]).map((gender) => (
+                      <button
+                        key={gender}
+                        type="button"
+                        onClick={() => setPreferences({ patientGender: gender })}
+                        className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                          preferences.patientGender === gender
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-background hover:bg-muted text-foreground'
+                        } ${gender !== 'male' ? 'border-l' : ''}`}
+                      >
+                        {gender.charAt(0).toUpperCase() + gender.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                  {!preferences.patientGender && (
+                    <p className="text-xs text-destructive">Required</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* Live Draft Mode Toggle */}
             <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
               <div className="space-y-1">
@@ -629,18 +678,26 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </div>
 
             {/* Recording Controls - context-sensitive based on status */}
-            <div className="flex gap-3">
-              {/* Idle state: Show Start button */}
-              {(liveScribe.status === 'idle' || liveScribe.status === 'done' || liveScribe.status === 'error') && (
-                <Button
-                  onClick={handleStartLiveScribe}
-                  variant="default"
-                  className="flex-1"
-                >
-                  <Mic className="h-4 w-4 mr-2" />
-                  Start Live Recording
-                </Button>
+            <div className="flex flex-col gap-2">
+              {/* Validation message when patient info missing */}
+              {(!preferences.patientName.trim() || !preferences.patientGender) && (
+                <p className="text-xs text-destructive text-center">
+                  Please fill in Patient Name and Gender above to start recording
+                </p>
               )}
+              <div className="flex gap-3">
+                {/* Idle state: Show Start button */}
+                {(liveScribe.status === 'idle' || liveScribe.status === 'done' || liveScribe.status === 'error') && (
+                  <Button
+                    onClick={handleStartLiveScribe}
+                    variant="default"
+                    className="flex-1"
+                    disabled={!preferences.patientName.trim() || !preferences.patientGender}
+                  >
+                    <Mic className="h-4 w-4 mr-2" />
+                    Start Live Recording
+                  </Button>
+                )}
               
               {/* Recording state: Show Pause and Stop buttons */}
               {liveScribe.status === 'recording' && (
@@ -697,6 +754,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                   Finalizing...
                 </Button>
               )}
+              </div>
             </div>
 
             {/* Running Summary Panel (Option B only) - show during recording, paused, or if summary exists */}
@@ -855,8 +913,9 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
               
               <Button 
                 onClick={handleStartBatchLatest} 
-                disabled={isStartingBatch} 
+                disabled={isStartingBatch || !preferences.patientName.trim() || !preferences.patientGender} 
                 variant="secondary"
+                title={(!preferences.patientName.trim() || !preferences.patientGender) ? 'Patient Name and Gender required' : ''}
               >
                 {isStartingBatch ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -1030,27 +1089,15 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
               {/* Patient Instructions Settings */}
               <div className="mt-4 pt-4 border-t border-border">
                 <Label className="text-sm font-medium mb-3 block">Patient Instructions Settings</Label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="patientFirstName" className="text-sm">Patient First Name (for greeting)</Label>
-                    <Input
-                      id="patientFirstName"
-                      value={preferences.patientFirstName}
-                      onChange={(e) => setPreferences({ patientFirstName: e.target.value })}
-                      placeholder="e.g., John"
-                      className="text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="clinicianDisplayName" className="text-sm">Clinician Name (for signature)</Label>
-                    <Input
-                      id="clinicianDisplayName"
-                      value={preferences.clinicianDisplayName}
-                      onChange={(e) => setPreferences({ clinicianDisplayName: e.target.value })}
-                      placeholder="e.g., Dr. Jane Smith"
-                      className="text-sm"
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor="clinicianDisplayName" className="text-sm">Clinician Name (for signature)</Label>
+                  <Input
+                    id="clinicianDisplayName"
+                    value={preferences.clinicianDisplayName}
+                    onChange={(e) => setPreferences({ clinicianDisplayName: e.target.value })}
+                    placeholder="e.g., Dr. Jane Smith"
+                    className="text-sm max-w-md"
+                  />
                 </div>
               </div>
               
