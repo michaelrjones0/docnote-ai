@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { LiveDraftMode } from './useDocNoteSession';
 
 export type LiveScribeStatus = 'idle' | 'recording' | 'finalizing' | 'done' | 'error';
 
@@ -12,17 +13,28 @@ interface TranscriptSegment {
 
 interface UseLiveScribeOptions {
   onTranscriptUpdate?: (transcript: string, segments: TranscriptSegment[]) => void;
+  onSummaryUpdate?: (summary: string) => void;
   onError?: (error: string) => void;
   chunkIntervalMs?: number;
+  liveDraftMode?: LiveDraftMode;
+  preferences?: object;
 }
 
 export function useLiveScribe(options: UseLiveScribeOptions = {}) {
-  const { onTranscriptUpdate, onError, chunkIntervalMs = 8000 } = options;
+  const { 
+    onTranscriptUpdate, 
+    onSummaryUpdate,
+    onError, 
+    chunkIntervalMs = 8000,
+    liveDraftMode = 'A',
+    preferences = {}
+  } = options;
   
   const [status, setStatus] = useState<LiveScribeStatus>('idle');
   const [transcript, setTranscript] = useState('');
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [runningSummary, setRunningSummary] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -31,6 +43,11 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const isProcessingRef = useRef(false);
   const pendingChunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // For running summary (Option B)
+  const lastSummaryTranscriptLengthRef = useRef(0);
+  const summaryIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const currentRunningSummaryRef = useRef<string | null>(null);
 
   const processAudioChunk = useCallback(async (audioBlob: Blob, chunkIndex: number) => {
     try {
@@ -127,13 +144,48 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     }
   }, [processAudioChunk, onTranscriptUpdate]);
 
+  // Update running summary (Option B only)
+  const updateRunningSummary = useCallback(async (fullTranscript: string) => {
+    const transcriptDelta = fullTranscript.slice(lastSummaryTranscriptLengthRef.current);
+    if (!transcriptDelta.trim()) return;
+
+    try {
+      console.log('[LiveScribe] Updating running summary, delta length:', transcriptDelta.length);
+      
+      const { data, error: fnError } = await supabase.functions.invoke('update-visit-summary', {
+        body: {
+          transcriptDelta,
+          runningSummary: currentRunningSummaryRef.current,
+          preferences
+        }
+      });
+
+      if (fnError) {
+        console.error('[LiveScribe] Summary update error:', fnError);
+        return;
+      }
+
+      if (data?.runningSummary) {
+        currentRunningSummaryRef.current = data.runningSummary;
+        setRunningSummary(data.runningSummary);
+        onSummaryUpdate?.(data.runningSummary);
+        lastSummaryTranscriptLengthRef.current = fullTranscript.length;
+      }
+    } catch (err) {
+      console.error('[LiveScribe] Summary update failed:', err);
+    }
+  }, [preferences, onSummaryUpdate]);
+
   const startRecording = useCallback(async () => {
     try {
       setError(null);
       setTranscript('');
       setSegments([]);
+      setRunningSummary(null);
       chunkIndexRef.current = 0;
       chunksRef.current = [];
+      lastSummaryTranscriptLengthRef.current = 0;
+      currentRunningSummaryRef.current = null;
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -167,24 +219,40 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         sendCurrentChunks();
       }, chunkIntervalMs);
 
+      // Set up summary interval for Option B (every 60-90 seconds, we'll use 75)
+      if (liveDraftMode === 'B') {
+        summaryIntervalRef.current = setInterval(() => {
+          setTranscript(currentTranscript => {
+            if (currentTranscript.length > lastSummaryTranscriptLengthRef.current + 100) {
+              updateRunningSummary(currentTranscript);
+            }
+            return currentTranscript;
+          });
+        }, 75000);
+      }
+
       setStatus('recording');
-      console.log('[LiveScribe] Recording started');
+      console.log('[LiveScribe] Recording started, mode:', liveDraftMode);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Failed to access microphone';
       setError(errMsg);
       setStatus('error');
       onError?.(errMsg);
     }
-  }, [chunkIntervalMs, sendCurrentChunks, onError]);
+  }, [chunkIntervalMs, sendCurrentChunks, onError, liveDraftMode, updateRunningSummary]);
 
   const stopRecording = useCallback(async (): Promise<string> => {
     console.log('[LiveScribe] Stopping recording...');
     setStatus('finalizing');
 
-    // Clear the interval
+    // Clear intervals
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+    if (summaryIntervalRef.current) {
+      clearInterval(summaryIntervalRef.current);
+      summaryIntervalRef.current = null;
     }
 
     // Stop the media recorder
@@ -214,23 +282,32 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       waitAttempts++;
     }
 
-    setStatus('done');
-    console.log('[LiveScribe] Recording stopped, transcript ready');
-
-    // Return the final transcript
+    // Get final transcript
     let finalTranscript = '';
     setTranscript(t => {
       finalTranscript = t;
       return t;
     });
 
+    // Final summary update for Option B
+    if (liveDraftMode === 'B' && finalTranscript.length > lastSummaryTranscriptLengthRef.current) {
+      await updateRunningSummary(finalTranscript);
+    }
+
+    setStatus('done');
+    console.log('[LiveScribe] Recording stopped, transcript ready');
+
     return finalTranscript;
-  }, [sendCurrentChunks]);
+  }, [sendCurrentChunks, liveDraftMode, updateRunningSummary]);
 
   const reset = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
+    }
+    if (summaryIntervalRef.current) {
+      clearInterval(summaryIntervalRef.current);
+      summaryIntervalRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -240,10 +317,13 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     chunksRef.current = [];
     chunkIndexRef.current = 0;
     isProcessingRef.current = false;
+    lastSummaryTranscriptLengthRef.current = 0;
+    currentRunningSummaryRef.current = null;
     setStatus('idle');
     setTranscript('');
     setSegments([]);
     setError(null);
+    setRunningSummary(null);
   }, []);
 
   return {
@@ -251,6 +331,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     transcript,
     segments,
     error,
+    runningSummary,
     startRecording,
     stopRecording,
     reset,

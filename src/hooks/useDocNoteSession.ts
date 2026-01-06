@@ -13,6 +13,8 @@ interface GeneratedNote {
   markdown: string;
 }
 
+export type LiveDraftMode = 'A' | 'B';
+
 export interface DocNoteSession {
   jobName: string | null;
   transcriptText: string | null;
@@ -20,6 +22,9 @@ export interface DocNoteSession {
   edited: GeneratedNote | null;
   updatedAt: string;
   markdownExpanded: boolean;
+  liveDraftMode: LiveDraftMode;
+  runningSummary: string | null;
+  summaryUpdatedAt: string | null;
 }
 
 const STORAGE_KEY = 'docnoteai_session';
@@ -31,6 +36,9 @@ const getEmptySession = (): DocNoteSession => ({
   edited: null,
   updatedAt: new Date().toISOString(),
   markdownExpanded: false,
+  liveDraftMode: 'A',
+  runningSummary: null,
+  summaryUpdatedAt: null,
 });
 
 const loadSession = (): DocNoteSession => {
@@ -45,6 +53,9 @@ const loadSession = (): DocNoteSession => {
         edited: parsed.edited ?? null,
         updatedAt: parsed.updatedAt ?? new Date().toISOString(),
         markdownExpanded: parsed.markdownExpanded ?? false,
+        liveDraftMode: parsed.liveDraftMode ?? 'A',
+        runningSummary: parsed.runningSummary ?? null,
+        summaryUpdatedAt: parsed.summaryUpdatedAt ?? null,
       };
     }
   } catch (e) {
@@ -108,6 +119,14 @@ export const useDocNoteSession = () => {
 
   const setMarkdownExpanded = useCallback((markdownExpanded: boolean) => {
     updateSession({ markdownExpanded });
+  }, [updateSession]);
+
+  const setLiveDraftMode = useCallback((liveDraftMode: LiveDraftMode) => {
+    updateSession({ liveDraftMode });
+  }, [updateSession]);
+
+  const setRunningSummary = useCallback((runningSummary: string | null) => {
+    updateSession({ runningSummary, summaryUpdatedAt: new Date().toISOString() });
   }, [updateSession]);
 
   // Check if user has made edits
@@ -244,6 +263,8 @@ ${baseNote.soap.plan || 'Not documented.'}`;
     setJobName,
     setTranscriptText,
     setMarkdownExpanded,
+    setLiveDraftMode,
+    setRunningSummary,
     handleNewGenerated,
     acceptNewGenerated,
     keepUserEdits,
