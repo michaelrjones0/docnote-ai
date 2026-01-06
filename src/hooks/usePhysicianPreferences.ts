@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
 export interface PhysicianPreferences {
+  noteStructure: 'SOAP' | 'Problem-Oriented';
   detailLevel: 'Brief' | 'Standard' | 'Detailed';
   planFormat: 'Bullets' | 'Paragraph';
   firstPerson: boolean;
@@ -14,6 +15,7 @@ const STORAGE_KEY = 'docnoteai_preferences';
 const MAX_STYLE_TEXT_LENGTH = 600;
 
 const getDefaultPreferences = (): PhysicianPreferences => ({
+  noteStructure: 'SOAP',
   detailLevel: 'Standard',
   planFormat: 'Bullets',
   firstPerson: false,
@@ -29,6 +31,9 @@ const loadPreferences = (): PhysicianPreferences => {
     if (stored) {
       const parsed = JSON.parse(stored);
       return {
+        noteStructure: ['SOAP', 'Problem-Oriented'].includes(parsed.noteStructure)
+          ? parsed.noteStructure
+          : 'SOAP',
         detailLevel: ['Brief', 'Standard', 'Detailed'].includes(parsed.detailLevel) 
           ? parsed.detailLevel 
           : 'Standard',
