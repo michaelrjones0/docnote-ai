@@ -11,6 +11,16 @@ interface TranscriptSegment {
   endMs: number;
 }
 
+export interface LiveScribeDebugInfo {
+  lastLiveCallAt: string | null;
+  lastLiveStatus: 'idle' | 'calling' | 'received' | 'error';
+  lastLiveError: string | null;
+  lastSummaryCallAt: string | null;
+  lastSummaryError: string | null;
+  chunksSent: number;
+  totalTranscriptLength: number;
+}
+
 interface UseLiveScribeOptions {
   onTranscriptUpdate?: (transcript: string, segments: TranscriptSegment[]) => void;
   onSummaryUpdate?: (summary: string) => void;
@@ -25,7 +35,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     onTranscriptUpdate, 
     onSummaryUpdate,
     onError, 
-    chunkIntervalMs = 8000,
+    chunkIntervalMs = 10000,
     liveDraftMode = 'A',
     preferences = {}
   } = options;
@@ -35,14 +45,27 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [runningSummary, setRunningSummary] = useState<string | null>(null);
+  
+  // Debug state
+  const [debugInfo, setDebugInfo] = useState<LiveScribeDebugInfo>({
+    lastLiveCallAt: null,
+    lastLiveStatus: 'idle',
+    lastLiveError: null,
+    lastSummaryCallAt: null,
+    lastSummaryError: null,
+    chunksSent: 0,
+    totalTranscriptLength: 0,
+  });
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const chunkIndexRef = useRef(0);
   const isProcessingRef = useRef(false);
-  const pendingChunksRef = useRef<Blob[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Accumulated transcript for proper delta calculation
+  const accumulatedTranscriptRef = useRef('');
   
   // For running summary (Option B)
   const lastSummaryTranscriptLengthRef = useRef(0);
@@ -50,6 +73,15 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const currentRunningSummaryRef = useRef<string | null>(null);
 
   const processAudioChunk = useCallback(async (audioBlob: Blob, chunkIndex: number) => {
+    const callTime = new Date().toISOString();
+    setDebugInfo(prev => ({
+      ...prev,
+      lastLiveCallAt: callTime,
+      lastLiveStatus: 'calling',
+      lastLiveError: null,
+      chunksSent: prev.chunksSent + 1,
+    }));
+    
     try {
       // Convert blob to base64
       const arrayBuffer = await audioBlob.arrayBuffer();
@@ -95,10 +127,24 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
 
       const result = await response.json();
       console.log(`[LiveScribe] Chunk ${chunkIndex} transcribed:`, result.text?.slice(0, 100));
+      
+      setDebugInfo(prev => ({
+        ...prev,
+        lastLiveStatus: 'received',
+        lastLiveError: null,
+      }));
 
       return result;
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error(`[LiveScribe] Error processing chunk ${chunkIndex}:`, err);
+      
+      setDebugInfo(prev => ({
+        ...prev,
+        lastLiveStatus: 'error',
+        lastLiveError: errMsg,
+      }));
+      
       throw err;
     }
   }, []);
@@ -124,30 +170,58 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       const result = await processAudioChunk(audioBlob, currentIndex);
       
       if (result?.text) {
-        setSegments(prev => {
-          const newSegments = [...prev, ...(result.segments || [])];
-          return newSegments;
-        });
-        
-        setTranscript(prev => {
-          const newTranscript = prev ? `${prev} ${result.text}` : result.text;
-          onTranscriptUpdate?.(newTranscript, result.segments || []);
-          return newTranscript;
-        });
+        // Append to accumulated transcript
+        const newText = result.text.trim();
+        if (newText) {
+          accumulatedTranscriptRef.current = accumulatedTranscriptRef.current
+            ? `${accumulatedTranscriptRef.current} ${newText}`
+            : newText;
+          
+          const fullTranscript = accumulatedTranscriptRef.current;
+          
+          setSegments(prev => {
+            const newSegments = [...prev, ...(result.segments || [])];
+            return newSegments;
+          });
+          
+          setTranscript(fullTranscript);
+          
+          setDebugInfo(prev => ({
+            ...prev,
+            totalTranscriptLength: fullTranscript.length,
+          }));
+          
+          // Call the callback to update session.transcriptText
+          onTranscriptUpdate?.(fullTranscript, result.segments || []);
+        }
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('[LiveScribe] Chunk processing failed:', errMsg);
+      setError(errMsg);
+      onError?.(errMsg);
       // Don't stop recording on individual chunk failure
     } finally {
       isProcessingRef.current = false;
     }
-  }, [processAudioChunk, onTranscriptUpdate]);
+  }, [processAudioChunk, onTranscriptUpdate, onError]);
 
   // Update running summary (Option B only)
-  const updateRunningSummary = useCallback(async (fullTranscript: string) => {
+  const updateRunningSummary = useCallback(async () => {
+    const fullTranscript = accumulatedTranscriptRef.current;
     const transcriptDelta = fullTranscript.slice(lastSummaryTranscriptLengthRef.current);
-    if (!transcriptDelta.trim()) return;
+    
+    if (!transcriptDelta.trim()) {
+      console.log('[LiveScribe] No new transcript delta for summary, skipping');
+      return;
+    }
+
+    const callTime = new Date().toISOString();
+    setDebugInfo(prev => ({
+      ...prev,
+      lastSummaryCallAt: callTime,
+      lastSummaryError: null,
+    }));
 
     try {
       console.log('[LiveScribe] Updating running summary, delta length:', transcriptDelta.length);
@@ -162,6 +236,10 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
 
       if (fnError) {
         console.error('[LiveScribe] Summary update error:', fnError);
+        setDebugInfo(prev => ({
+          ...prev,
+          lastSummaryError: fnError.message || 'Summary update failed',
+        }));
         return;
       }
 
@@ -170,9 +248,15 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         setRunningSummary(data.runningSummary);
         onSummaryUpdate?.(data.runningSummary);
         lastSummaryTranscriptLengthRef.current = fullTranscript.length;
+        console.log('[LiveScribe] Summary updated successfully');
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Unknown error';
       console.error('[LiveScribe] Summary update failed:', err);
+      setDebugInfo(prev => ({
+        ...prev,
+        lastSummaryError: errMsg,
+      }));
     }
   }, [preferences, onSummaryUpdate]);
 
@@ -184,8 +268,19 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       setRunningSummary(null);
       chunkIndexRef.current = 0;
       chunksRef.current = [];
+      accumulatedTranscriptRef.current = '';
       lastSummaryTranscriptLengthRef.current = 0;
       currentRunningSummaryRef.current = null;
+      
+      setDebugInfo({
+        lastLiveCallAt: null,
+        lastLiveStatus: 'idle',
+        lastLiveError: null,
+        lastSummaryCallAt: null,
+        lastSummaryError: null,
+        chunksSent: 0,
+        totalTranscriptLength: 0,
+      });
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -219,15 +314,12 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
         sendCurrentChunks();
       }, chunkIntervalMs);
 
-      // Set up summary interval for Option B (every 60-90 seconds, we'll use 75)
+      // Set up summary interval for Option B (every 75 seconds)
       if (liveDraftMode === 'B') {
         summaryIntervalRef.current = setInterval(() => {
-          setTranscript(currentTranscript => {
-            if (currentTranscript.length > lastSummaryTranscriptLengthRef.current + 100) {
-              updateRunningSummary(currentTranscript);
-            }
-            return currentTranscript;
-          });
+          if (accumulatedTranscriptRef.current.length > lastSummaryTranscriptLengthRef.current + 50) {
+            updateRunningSummary();
+          }
         }, 75000);
       }
 
@@ -237,6 +329,11 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       const errMsg = err instanceof Error ? err.message : 'Failed to access microphone';
       setError(errMsg);
       setStatus('error');
+      setDebugInfo(prev => ({
+        ...prev,
+        lastLiveError: errMsg,
+        lastLiveStatus: 'error',
+      }));
       onError?.(errMsg);
     }
   }, [chunkIntervalMs, sendCurrentChunks, onError, liveDraftMode, updateRunningSummary]);
@@ -282,20 +379,16 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       waitAttempts++;
     }
 
-    // Get final transcript
-    let finalTranscript = '';
-    setTranscript(t => {
-      finalTranscript = t;
-      return t;
-    });
+    // Get final transcript from ref (more reliable than state)
+    const finalTranscript = accumulatedTranscriptRef.current;
 
     // Final summary update for Option B
     if (liveDraftMode === 'B' && finalTranscript.length > lastSummaryTranscriptLengthRef.current) {
-      await updateRunningSummary(finalTranscript);
+      await updateRunningSummary();
     }
 
     setStatus('done');
-    console.log('[LiveScribe] Recording stopped, transcript ready');
+    console.log('[LiveScribe] Recording stopped, transcript length:', finalTranscript.length);
 
     return finalTranscript;
   }, [sendCurrentChunks, liveDraftMode, updateRunningSummary]);
@@ -317,6 +410,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     chunksRef.current = [];
     chunkIndexRef.current = 0;
     isProcessingRef.current = false;
+    accumulatedTranscriptRef.current = '';
     lastSummaryTranscriptLengthRef.current = 0;
     currentRunningSummaryRef.current = null;
     setStatus('idle');
@@ -324,6 +418,15 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     setSegments([]);
     setError(null);
     setRunningSummary(null);
+    setDebugInfo({
+      lastLiveCallAt: null,
+      lastLiveStatus: 'idle',
+      lastLiveError: null,
+      lastSummaryCallAt: null,
+      lastSummaryError: null,
+      chunksSent: 0,
+      totalTranscriptLength: 0,
+    });
   }, []);
 
   return {
@@ -332,6 +435,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     segments,
     error,
     runningSummary,
+    debugInfo,
     startRecording,
     stopRecording,
     reset,
