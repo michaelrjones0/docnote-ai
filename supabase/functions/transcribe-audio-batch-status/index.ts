@@ -307,7 +307,31 @@ serve(async (req) => {
 
     if (jobStatus.status === 'COMPLETED' && jobStatus.transcriptUri) {
       const transcriptResponse = await fetch(jobStatus.transcriptUri);
-      const transcriptData = await transcriptResponse.json();
+      const responseStatus = transcriptResponse.status;
+      const responseStatusText = transcriptResponse.statusText;
+      const contentType = transcriptResponse.headers.get('content-type') || '';
+      const raw = await transcriptResponse.text();
+      
+      // Check if response is JSON
+      const isJson = contentType.includes('application/json') || raw.trim().startsWith('{');
+      
+      if (!transcriptResponse.ok || !isJson) {
+        // Return structured error for non-JSON or failed responses
+        return new Response(
+          JSON.stringify({ 
+            ok: false,
+            error: 'Non-JSON response from AWS/S3',
+            status: responseStatus,
+            statusText: responseStatusText,
+            contentType,
+            rawSnippet: raw.slice(0, 500),
+            url: jobStatus.transcriptUri.replace(/\?.*$/, '?[REDACTED]') // Redact query params (contains signature)
+          }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      const transcriptData = JSON.parse(raw);
       const parsed = parseTranscriptWithSpeakers(transcriptData);
 
       return new Response(
