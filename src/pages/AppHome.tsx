@@ -97,6 +97,7 @@ const AppHome = () => {
   // Live Scribe
   const liveTranscriptRef = useRef<HTMLPreElement>(null);
   const conflictBannerRef = useRef<HTMLDivElement>(null);
+  const modeSwitchBannerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to conflict banner when it appears
   useEffect(() => {
@@ -104,6 +105,19 @@ const AppHome = () => {
       conflictBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [showConflictBanner]);
+
+  // Auto-scroll to mode switch banner when conditions change
+  useEffect(() => {
+    const noteType = getCurrentNoteType();
+    const soap = getCurrentSoap();
+    const soap3 = getCurrentSoap3();
+    const hasNoteNow = soap !== null || soap3 !== null;
+    const shouldShow = hasNoteNow && noteType !== preferences.noteEditorMode;
+    
+    if (shouldShow && modeSwitchBannerRef.current) {
+      modeSwitchBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [preferences.noteEditorMode, getCurrentNoteType, getCurrentSoap, getCurrentSoap3]);
   const liveScribe = useLiveScribe({
     onTranscriptUpdate: (transcript) => {
       setTranscriptText(transcript);
@@ -425,14 +439,6 @@ const AppHome = () => {
   
   // Check if the editor mode dropdown differs from the current note's type
   const showModeSwitchBanner = hasNote && currentNoteType !== preferences.noteEditorMode;
-  const modeSwitchBannerRef = useRef<HTMLDivElement>(null);
-  
-  // Auto-scroll to mode switch banner when it appears
-  useEffect(() => {
-    if (showModeSwitchBanner && modeSwitchBannerRef.current) {
-      modeSwitchBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [showModeSwitchBanner]);
 
   return (
     <DemoModeGuard>
