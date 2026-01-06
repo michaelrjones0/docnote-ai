@@ -99,16 +99,23 @@ async function signRequest(
   
   const payloadHash = await sha256(typeof body === 'string' ? body : body);
   
-  const signedHeaders: Record<string, string> = {
-    ...headers,
-    'host': host,
-    'x-amz-date': amzDate,
-    'x-amz-content-sha256': payloadHash,
-  };
+  // Normalize ALL header names to lowercase BEFORE any processing
+  const normalizedHeaders: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    normalizedHeaders[key.toLowerCase()] = value;
+  }
+  
+  // Add required headers (already lowercase)
+  normalizedHeaders['host'] = host;
+  normalizedHeaders['x-amz-date'] = amzDate;
+  normalizedHeaders['x-amz-content-sha256'] = payloadHash;
 
-  const sortedHeaderKeys = Object.keys(signedHeaders).sort();
-  const canonicalHeaders = sortedHeaderKeys.map(k => `${k.toLowerCase()}:${signedHeaders[k].trim()}\n`).join('');
-  const signedHeadersStr = sortedHeaderKeys.map(k => k.toLowerCase()).join(';');
+  // Sort lowercase header names
+  const sortedHeaderKeys = Object.keys(normalizedHeaders).sort();
+  
+  // Build canonical headers using lowercase names and trimmed values
+  const canonicalHeaders = sortedHeaderKeys.map(k => `${k}:${normalizedHeaders[k].trim()}\n`).join('');
+  const signedHeadersStr = sortedHeaderKeys.join(';');
 
   const canonicalRequest = [
     method,
@@ -141,8 +148,8 @@ async function signRequest(
   const authHeader = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeadersStr}, Signature=${signature}`;
 
   return {
-    ...signedHeaders,
-    'Authorization': authHeader,
+    ...normalizedHeaders,
+    'authorization': authHeader,
   };
 }
 
