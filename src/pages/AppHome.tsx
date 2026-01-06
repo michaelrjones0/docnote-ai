@@ -346,6 +346,9 @@ const AppHome = () => {
           soap: data.soap,
           markdown: data.markdown || data.note || '',
           patientInstructions: data.patientInstructions || '',
+          patientName: data.patientName || preferences.patientName || '',
+          patientGender: data.patientGender || preferences.patientGender || 'other',
+          patientPronouns: data.patientPronouns || { subject: 'they', object: 'them', possessive: 'their' },
         }, expectedMode);
         toast({
           title: 'SOAP note generated',
@@ -362,6 +365,9 @@ const AppHome = () => {
           ap: data.ap || [],
           markdown: data.markdown || data.note || '',
           patientInstructions: data.patientInstructions || '',
+          patientName: data.patientName || preferences.patientName || '',
+          patientGender: data.patientGender || preferences.patientGender || 'other',
+          patientPronouns: data.patientPronouns || { subject: 'they', object: 'them', possessive: 'their' },
         }, expectedMode);
         toast({
           title: 'SOAP note generated',

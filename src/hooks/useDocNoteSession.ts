@@ -1,6 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 
 // =====================================================
+// Patient info for encounter (included in note payload)
+// =====================================================
+export type PatientGender = 'male' | 'female' | 'other';
+
+export interface PatientPronouns {
+  subject: string;
+  object: string;
+  possessive: string;
+}
+
+export interface PatientInfo {
+  patientName: string;
+  patientGender: PatientGender;
+  patientPronouns: PatientPronouns;
+}
+
+// =====================================================
 // 4-field SOAP data (S, O, A, P separate)
 // =====================================================
 interface SoapData {
@@ -28,14 +45,14 @@ interface ApEntry {
 // =====================================================
 // Generated note can be either 4-field or 3-field
 // =====================================================
-interface GeneratedNote4Field {
+interface GeneratedNote4Field extends PatientInfo {
   noteType: 'SOAP_4_FIELD' | 'SOAP';
   soap: SoapData;
   markdown: string;
   patientInstructions?: string;
 }
 
-interface GeneratedNote3Field {
+interface GeneratedNote3Field extends PatientInfo {
   noteType: 'SOAP_3_FIELD';
   soap3: Soap3Data;
   ap: ApEntry[];

@@ -712,6 +712,18 @@ Remember:
         // Extract patient instructions
         const patientInstructions = typeof parsed.patientInstructions === 'string' ? parsed.patientInstructions : '';
 
+        // Build patient info for self-contained export
+        const pronouns = getPronounSet(preferences.patientGender);
+        const patientInfo = {
+          patientName: preferences.patientName,
+          patientGender: preferences.patientGender || 'other',
+          patientPronouns: {
+            subject: pronouns.subject,
+            object: pronouns.object,
+            possessive: pronouns.possessive,
+          },
+        };
+
         console.log('[generate-note] SOAP_4_FIELD note generated successfully');
 
         return new Response(JSON.stringify({ 
@@ -719,7 +731,8 @@ Remember:
           note: markdown,
           markdown: markdown,
           soap: soap, // Contains: subjective, objective, assessment, plan
-          patientInstructions
+          patientInstructions,
+          ...patientInfo,
         }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -768,6 +781,18 @@ Remember:
       // Extract patient instructions
       const patientInstructions = typeof parsed.patientInstructions === 'string' ? parsed.patientInstructions : '';
 
+      // Build patient info for self-contained export
+      const pronouns = getPronounSet(preferences.patientGender);
+      const patientInfo = {
+        patientName: preferences.patientName,
+        patientGender: preferences.patientGender || 'other',
+        patientPronouns: {
+          subject: pronouns.subject,
+          object: pronouns.object,
+          possessive: pronouns.possessive,
+        },
+      };
+
       console.log('[generate-note] SOAP_3_FIELD note generated successfully with', validatedAp.length, 'problems');
 
       return new Response(JSON.stringify({ 
@@ -776,7 +801,8 @@ Remember:
         markdown: markdown,
         soap3: soap3, // Contains: subjective, objective, assessmentPlan
         ap: validatedAp,
-        patientInstructions
+        patientInstructions,
+        ...patientInfo,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
