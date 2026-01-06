@@ -13,6 +13,8 @@ const AppHome = () => {
   const { toast } = useToast();
   const [authCheckResult, setAuthCheckResult] = useState<string | null>(null);
   const [isTestingAuth, setIsTestingAuth] = useState(false);
+  const [batchStatusResult, setBatchStatusResult] = useState<string | null>(null);
+  const [isTestingBatchStatus, setIsTestingBatchStatus] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -67,6 +69,37 @@ const AppHome = () => {
     }
   };
 
+  const handleTestBatchStatus = async () => {
+    if (!session?.access_token) {
+      setBatchStatusResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
+      return;
+    }
+
+    setIsTestingBatchStatus(true);
+    setBatchStatusResult(null);
+
+    try {
+      const response = await fetch(
+        'https://jmzmwkfctefzokhesxjf.supabase.co/functions/v1/transcribe-audio-batch-status',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        }
+      );
+
+      const data = await response.json();
+      setBatchStatusResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setBatchStatusResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
+    } finally {
+      setIsTestingBatchStatus(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -103,6 +136,21 @@ const AppHome = () => {
             {authCheckResult && (
               <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
                 {authCheckResult}
+              </pre>
+            )}
+
+            <Button onClick={handleTestBatchStatus} disabled={isTestingBatchStatus} className="w-full">
+              {isTestingBatchStatus ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-4 w-4 mr-2" />
+              )}
+              Test Batch Status
+            </Button>
+            
+            {batchStatusResult && (
+              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
+                {batchStatusResult}
               </pre>
             )}
           </div>
