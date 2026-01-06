@@ -46,6 +46,173 @@ ${chronicConditions.map((c: any) => `- ${c.condition_name}${c.icd_code ? ` (${c.
 `;
     }
 
+    // For SOAP notes, use structured JSON output
+    if (noteType === 'SOAP') {
+      const soapSystemPrompt = `You are an expert medical scribe assistant. Your task is to generate a SOAP note from clinical encounter transcripts.
+
+CRITICAL INSTRUCTIONS:
+1. Write EVERYTHING from the CLINICIAN'S FIRST-PERSON PERSPECTIVE. Use "I" statements.
+   - Example: "I examined the patient..." NOT "The provider examined..."
+   - Example: "My assessment is..." NOT "The assessment is..."
+
+2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL:
+   - Do NOT invent or hallucinate objective data.
+   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
+   - Do NOT write plausible-sounding exam findings that are not in the transcript.
+   - Only include objective data that is EXPLICITLY stated in the transcript.
+
+3. Be thorough but concise for sections that have data.
+
+4. You must output ONLY valid JSON matching this exact structure:
+{
+  "soap": {
+    "subjective": "string with patient's reported symptoms, history of present illness",
+    "objective": "string with exam findings OR 'Not documented.' if none in transcript",
+    "assessment": "string with diagnoses or differential diagnoses",
+    "plan": "string with treatment plan, medications, follow-up"
+  },
+  "markdown": "formatted markdown note with ## headers for each SOAP section"
+}
+
+5. The markdown field should be a nicely formatted clinical note with:
+   ## Subjective
+   [content]
+   
+   ## Objective
+   [content]
+   
+   ## Assessment
+   [content]
+   
+   ## Plan
+   [content]`;
+
+      const soapUserPrompt = `Generate a SOAP note from this clinical encounter.
+
+## Patient Context:
+${patientContext || 'No additional context provided'}
+
+## Chief Complaint:
+${chiefComplaint || 'Not specified'}
+
+${chronicContextSection}
+
+${previousContextSection}
+
+## Encounter Transcript:
+${transcript}
+
+Remember: 
+- Write from my perspective as the clinician using "I" statements.
+- For Objective: ONLY include findings explicitly stated in the transcript. If no objective data is mentioned, write "Not documented."
+- Output ONLY valid JSON with "soap" object and "markdown" string.`;
+
+      console.log('Generating structured SOAP note with Lovable AI...');
+
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { role: 'system', content: soapSystemPrompt },
+            { role: 'user', content: soapUserPrompt }
+          ],
+          temperature: 0.3,
+          max_tokens: 4000,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('AI gateway error:', response.status, errorText);
+        
+        if (response.status === 429) {
+          return new Response(JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }), {
+            status: 429,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        if (response.status === 402) {
+          return new Response(JSON.stringify({ error: 'AI credits exhausted. Please add funds.' }), {
+            status: 402,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        throw new Error(`AI gateway error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const rawContent = data.choices?.[0]?.message?.content;
+
+      if (!rawContent) {
+        throw new Error('No content generated');
+      }
+
+      console.log('Raw AI response:', rawContent);
+
+      // Parse the JSON response
+      let parsed;
+      try {
+        // Try to extract JSON from the response (handle markdown code blocks)
+        let jsonStr = rawContent.trim();
+        if (jsonStr.startsWith('```json')) {
+          jsonStr = jsonStr.slice(7);
+        } else if (jsonStr.startsWith('```')) {
+          jsonStr = jsonStr.slice(3);
+        }
+        if (jsonStr.endsWith('```')) {
+          jsonStr = jsonStr.slice(0, -3);
+        }
+        parsed = JSON.parse(jsonStr.trim());
+      } catch (parseError) {
+        console.error('Failed to parse AI response as JSON:', parseError);
+        console.error('Raw content was:', rawContent);
+        return new Response(JSON.stringify({ 
+          error: 'Failed to parse structured SOAP response from AI',
+          details: 'The AI did not return valid JSON'
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Validate the structure
+      const soap = parsed?.soap;
+      if (!soap || 
+          typeof soap.subjective !== 'string' ||
+          typeof soap.objective !== 'string' ||
+          typeof soap.assessment !== 'string' ||
+          typeof soap.plan !== 'string') {
+        console.error('Invalid SOAP structure:', parsed);
+        return new Response(JSON.stringify({ 
+          error: 'Invalid SOAP structure from AI',
+          details: 'Missing or invalid soap fields (subjective, objective, assessment, plan)'
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
+        `## Subjective\n${soap.subjective}\n\n## Objective\n${soap.objective}\n\n## Assessment\n${soap.assessment}\n\n## Plan\n${soap.plan}`;
+
+      console.log('SOAP note generated successfully');
+
+      return new Response(JSON.stringify({ 
+        noteType: 'SOAP',
+        note: markdown,
+        markdown: markdown,
+        soap: soap
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // For non-SOAP note types, use the original flow
     const noteTemplates: Record<string, string> = {
       'SOAP': `Generate a SOAP note with these sections:
 - Subjective: Patient's reported symptoms, history of present illness
