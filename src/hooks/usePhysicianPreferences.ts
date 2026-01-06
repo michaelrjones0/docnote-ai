@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
+export type NoteEditorMode = 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
+
 export interface PhysicianPreferences {
   noteStructure: 'SOAP' | 'Problem-Oriented';
   detailLevel: 'Brief' | 'Standard' | 'Detailed';
@@ -9,6 +11,7 @@ export interface PhysicianPreferences {
   styleText: string;
   assessmentProblemList: boolean;
   includeFollowUpLine: boolean;
+  noteEditorMode: NoteEditorMode;
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
@@ -23,6 +26,7 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   styleText: '',
   assessmentProblemList: true,
   includeFollowUpLine: true,
+  noteEditorMode: 'SOAP_4_FIELD',
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -47,6 +51,9 @@ const loadPreferences = (): PhysicianPreferences => {
           : '',
         assessmentProblemList: typeof parsed.assessmentProblemList === 'boolean' ? parsed.assessmentProblemList : true,
         includeFollowUpLine: typeof parsed.includeFollowUpLine === 'boolean' ? parsed.includeFollowUpLine : true,
+        noteEditorMode: ['SOAP_4_FIELD', 'SOAP_3_FIELD'].includes(parsed.noteEditorMode)
+          ? parsed.noteEditorMode
+          : 'SOAP_4_FIELD',
       };
     }
   } catch (e) {

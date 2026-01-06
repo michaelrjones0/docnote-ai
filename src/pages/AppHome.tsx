@@ -11,8 +11,8 @@ import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio } from 'lucide-react';
-import { useDocNoteSession } from '@/hooks/useDocNoteSession';
-import { usePhysicianPreferences } from '@/hooks/usePhysicianPreferences';
+import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
+import { usePhysicianPreferences, NoteEditorMode } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
@@ -23,11 +23,25 @@ interface SoapData {
   plan: string;
 }
 
+interface Soap3Data {
+  subjective: string;
+  objective: string;
+  assessmentPlan: string;
+}
+
+interface ApEntry {
+  problem: string;
+  assessment: string;
+  plan: string[];
+}
+
 interface SoapResponse {
   noteType: string;
   note: string;
   markdown: string;
-  soap: SoapData;
+  soap?: SoapData;
+  soap3?: Soap3Data;
+  ap?: ApEntry[];
   error?: string;
 }
 
@@ -48,6 +62,7 @@ const AppHome = () => {
   const {
     session: docSession,
     showConflictBanner,
+    modeMismatchWarning,
     setJobName,
     setTranscriptText,
     setMarkdownExpanded,
@@ -56,12 +71,21 @@ const AppHome = () => {
     handleNewGenerated,
     acceptNewGenerated,
     keepUserEdits,
+    clearModeMismatchWarning,
+    // 4-field helpers
     editSoapField,
     syncMarkdownFromSoap,
-    clearSession,
     getCurrentSoap,
+    // 3-field helpers
+    editSoap3Field,
+    syncMarkdownFromSoap3,
+    getCurrentSoap3,
+    getCurrentAp,
+    // Common helpers
+    clearSession,
     getCurrentMarkdown,
     getExportJson,
+    getCurrentNoteType,
   } = useDocNoteSession();
 
   // Live Scribe
@@ -250,6 +274,7 @@ const AppHome = () => {
     }
 
     setIsGeneratingSoap(true);
+    const expectedMode = preferences.noteEditorMode;
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-note', {
@@ -266,17 +291,45 @@ const AppHome = () => {
           description: error.message,
           variant: 'destructive',
         });
-      } else if (data?.soap) {
+        return;
+      }
+      
+      // Handle 4-field response
+      if (data?.soap && (data.noteType === 'SOAP_4_FIELD' || data.noteType === 'SOAP' || expectedMode === 'SOAP_4_FIELD')) {
         handleNewGenerated({
-          noteType: data.noteType || 'SOAP',
+          noteType: 'SOAP_4_FIELD',
           soap: data.soap,
           markdown: data.markdown || data.note || '',
-        });
+        }, expectedMode);
         toast({
           title: 'SOAP note generated',
-          description: 'Your note has been generated successfully.',
+          description: 'Your 4-field SOAP note has been generated.',
         });
+        return;
       }
+      
+      // Handle 3-field response
+      if (data?.soap3 && (data.noteType === 'SOAP_3_FIELD' || expectedMode === 'SOAP_3_FIELD')) {
+        handleNewGenerated({
+          noteType: 'SOAP_3_FIELD',
+          soap3: data.soap3,
+          ap: data.ap || [],
+          markdown: data.markdown || data.note || '',
+        }, expectedMode);
+        toast({
+          title: 'SOAP note generated',
+          description: 'Your 3-field SOAP note has been generated.',
+        });
+        return;
+      }
+
+      // Fallback: unexpected response structure
+      toast({
+        title: 'Generation issue',
+        description: 'Unexpected response format from AI. Check console for details.',
+        variant: 'destructive',
+      });
+      console.error('[AppHome] Unexpected generate-note response:', data);
     } catch (err) {
       toast({
         title: 'Generation failed',
@@ -347,8 +400,12 @@ const AppHome = () => {
   }
 
   const currentSoap = getCurrentSoap();
+  const currentSoap3 = getCurrentSoap3();
+  const currentAp = getCurrentAp();
   const currentMarkdown = getCurrentMarkdown();
   const exportJson = getExportJson();
+  const currentNoteType = getCurrentNoteType();
+  const hasNote = currentSoap !== null || currentSoap3 !== null;
 
   return (
     <DemoModeGuard>
@@ -403,6 +460,29 @@ const AppHome = () => {
                     Replace edits
                   </Button>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Mode Mismatch Warning */}
+        {modeMismatchWarning && (
+          <Card className="border-orange-500 bg-orange-50 dark:bg-orange-950/20">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="h-5 w-5 text-orange-600" />
+                  <span className="text-sm font-medium">
+                    {modeMismatchWarning}
+                  </span>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={clearModeMismatchWarning}
+                >
+                  Dismiss
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -692,6 +772,23 @@ const AppHome = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label htmlFor="noteEditorMode" className="text-sm">Editor Mode</Label>
+                  <Select
+                    value={preferences.noteEditorMode}
+                    onValueChange={(value: NoteEditorMode) => 
+                      setPreferences({ noteEditorMode: value })
+                    }
+                  >
+                    <SelectTrigger id="noteEditorMode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SOAP_4_FIELD">SOAP (4 fields: S / O / A / P)</SelectItem>
+                      <SelectItem value="SOAP_3_FIELD">SOAP (3 fields: S / O / A&P combined)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="noteStructure" className="text-sm">Note Structure</Label>
                   <Select
                     value={preferences.noteStructure}
@@ -834,8 +931,15 @@ const AppHome = () => {
         <Card>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">SOAP Note</CardTitle>
-              {currentSoap && (
+              <CardTitle className="text-lg">
+                SOAP Note
+                {currentNoteType && (
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
+                    ({currentNoteType === 'SOAP_4_FIELD' ? '4-field' : '3-field'})
+                  </span>
+                )}
+              </CardTitle>
+              {hasNote && (
                 <div className="flex gap-2">
                   <CopyButton 
                     text={currentMarkdown} 
@@ -850,9 +954,10 @@ const AppHome = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {currentSoap ? (
+            {/* 4-FIELD MODE */}
+            {currentSoap && currentNoteType === 'SOAP_4_FIELD' && (
               <div className="space-y-4">
-                {/* Editable SOAP Cards - Vertical Stack */}
+                {/* Editable SOAP Cards - 4 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
                     <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
@@ -919,7 +1024,7 @@ const AppHome = () => {
                       className="flex items-center gap-1"
                     >
                       <RefreshCw className="h-3 w-3" />
-                      Sync Markdown from SOAP
+                      Sync Markdown
                     </Button>
                   </div>
                   {docSession.markdownExpanded && (
@@ -929,7 +1034,100 @@ const AppHome = () => {
                   )}
                 </div>
               </div>
-            ) : (
+            )}
+
+            {/* 3-FIELD MODE */}
+            {currentSoap3 && currentNoteType === 'SOAP_3_FIELD' && (
+              <div className="space-y-4">
+                {/* Editable SOAP Cards - 3 Fields */}
+                <div className="space-y-4">
+                  <div className="border rounded-lg p-4 bg-card">
+                    <Label htmlFor="soap3-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Subjective
+                    </Label>
+                    <AutoResizeTextarea
+                      id="soap3-subjective"
+                      value={currentSoap3.subjective || ''}
+                      onChange={(e) => editSoap3Field('subjective', e.target.value)}
+                      placeholder="Not documented."
+                    />
+                  </div>
+                  
+                  <div className="border rounded-lg p-4 bg-card">
+                    <Label htmlFor="soap3-objective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Objective
+                    </Label>
+                    <AutoResizeTextarea
+                      id="soap3-objective"
+                      value={currentSoap3.objective || ''}
+                      onChange={(e) => editSoap3Field('objective', e.target.value)}
+                      placeholder="Not documented."
+                    />
+                  </div>
+                  
+                  <div className="border rounded-lg p-4 bg-card">
+                    <Label htmlFor="soap3-assessmentPlan" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Assessment & Plan
+                    </Label>
+                    <AutoResizeTextarea
+                      id="soap3-assessmentPlan"
+                      value={currentSoap3.assessmentPlan || ''}
+                      onChange={(e) => editSoap3Field('assessmentPlan', e.target.value)}
+                      placeholder="Not documented."
+                    />
+                  </div>
+                </div>
+
+                {/* AP Problem List (read-only info) */}
+                {currentAp && currentAp.length > 0 && (
+                  <div className="border rounded-lg p-4 bg-muted/30">
+                    <Label className="font-semibold text-sm text-muted-foreground mb-2 uppercase tracking-wide block">
+                      Problem Breakdown ({currentAp.length} problem{currentAp.length > 1 ? 's' : ''})
+                    </Label>
+                    <div className="space-y-2 text-sm">
+                      {currentAp.map((entry, idx) => (
+                        <div key={idx} className="border-l-2 border-primary/30 pl-3">
+                          <strong>{idx + 1}. {entry.problem}</strong>
+                          <div className="text-muted-foreground">Assessment: {entry.assessment}</div>
+                          <div className="text-muted-foreground">
+                            Plan: {entry.plan.join(', ')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Markdown Preview */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <button 
+                      onClick={() => setMarkdownExpanded(!docSession.markdownExpanded)}
+                      className="text-sm text-muted-foreground hover:text-foreground font-medium cursor-pointer"
+                    >
+                      {docSession.markdownExpanded ? '▼' : '▶'} View Formatted Markdown
+                    </button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={syncMarkdownFromSoap3}
+                      className="flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Sync Markdown
+                    </Button>
+                  </div>
+                  {docSession.markdownExpanded && (
+                    <pre className="bg-muted p-4 rounded-md overflow-auto max-h-64 whitespace-pre-wrap font-mono border text-sm">
+                      {currentMarkdown || 'No markdown available.'}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* No note yet */}
+            {!hasNote && (
               <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
                 No SOAP note generated yet. Click "Generate SOAP" after loading a transcript.
               </div>

@@ -45,6 +45,7 @@ interface Preferences {
   styleText: string;
   assessmentProblemList: boolean;
   includeFollowUpLine: boolean;
+  noteEditorMode: 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
 }
 
 const validatePreferences = (prefs: any): Preferences => {
@@ -63,6 +64,9 @@ const validatePreferences = (prefs: any): Preferences => {
     styleText: typeof prefs?.styleText === 'string' ? prefs.styleText.slice(0, 600) : '',
     assessmentProblemList: typeof prefs?.assessmentProblemList === 'boolean' ? prefs.assessmentProblemList : true,
     includeFollowUpLine: typeof prefs?.includeFollowUpLine === 'boolean' ? prefs.includeFollowUpLine : true,
+    noteEditorMode: ['SOAP_4_FIELD', 'SOAP_3_FIELD'].includes(prefs?.noteEditorMode)
+      ? prefs.noteEditorMode
+      : 'SOAP_4_FIELD',
   };
 };
 
@@ -122,9 +126,11 @@ ${prefs.styleText.trim()}`);
   return instructions.join('\n\n');
 };
 
-// NEW: 3-field format (subjective, objective, assessmentPlan)
-const buildThreeFieldSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
-  return `You are an expert medical scribe assistant. Your task is to generate a clinical note from encounter transcripts with 3 sections: Subjective, Objective, and Assessment/Plan (combined).
+// =====================================================
+// SOAP_4_FIELD: 4 separate fields (S, O, A, P)
+// =====================================================
+const buildFourFieldSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+  return `You are an expert medical scribe assistant. Your task is to generate a clinical note from encounter transcripts with 4 sections: Subjective, Objective, Assessment, and Plan.
 
 ## PHYSICIAN PREFERENCES (apply these strictly):
 ${preferenceInstructions}
@@ -143,25 +149,104 @@ ${preferenceInstructions}
    - Do NOT write plausible-sounding exam findings that are not in the transcript.
    - Only include objective data that is EXPLICITLY stated in the transcript.
 
-3. ASSESSMENT/PLAN (COMBINED):
-   - Combine the assessment (clinical problem statement/diagnosis) with the plan (actionable steps).
-   - Start with the clinical problem(s), then the plan for each.
+3. ASSESSMENT:
+   - State the clinical problem(s)/diagnosis(es).
+   ${prefs.assessmentProblemList ? '- Format as a numbered problem list.' : '- Write as clinical narrative.'}
    - BAD: "I am assessing the patient for..." or "The assessment is that..."
-   - GOOD: "1. Hypertension, uncontrolled - increase lisinopril to 20mg daily, recheck BP in 2 weeks"
-   ${prefs.planFormat === 'Bullets' ? '- Format the plan portion as bullet list with "- " prefix.' : '- Write the plan portion as flowing text.'}
-   - Use active voice. State what was done or will be done.
+   - GOOD: "1. Hypertension, uncontrolled" or "1. Acute low back pain"
 
-4. You must output ONLY valid JSON matching this exact structure:
+4. PLAN:
+   - State what will be done for each problem.
+   ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as flowing paragraph.'}
+   - Use active voice.
+   ${prefs.includeFollowUpLine ? '- End with follow-up timing if mentioned, otherwise "Follow up as needed."' : ''}
+
+5. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
-    "subjective": "string - patient's reported symptoms/history, concise, no filler",
+    "subjective": "string",
     "objective": "string - exam findings OR 'Not documented.' if none in transcript",
-    "assessmentPlan": "string - combined assessment and plan"
+    "assessment": "string",
+    "plan": "string"
   },
   "markdown": "formatted markdown note with ## headers for each section"
 }
 
-5. The markdown field should be a nicely formatted clinical note with:
+6. The markdown field should be a nicely formatted clinical note with:
+   ## Subjective
+   [content]
+   
+   ## Objective
+   [content]
+   
+   ## Assessment
+   [content]
+   
+   ## Plan
+   [content]`;
+};
+
+// =====================================================
+// SOAP_3_FIELD: 3 sections (S, O, A/P combined)
+// =====================================================
+const buildThreeFieldSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+  return `You are an expert medical scribe assistant. Your task is to generate a clinical note from encounter transcripts with 3 sections: Subjective, Objective, and Assessment & Plan (combined).
+
+## PHYSICIAN PREFERENCES (apply these strictly):
+${preferenceInstructions}
+
+## CRITICAL INSTRUCTIONS:
+
+1. SUBJECTIVE:
+   - Summarize the patient's reported symptoms and history of present illness.
+   - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
+   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - Be concise and direct.
+
+2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
+   - Do NOT invent or hallucinate objective data.
+   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
+   - Do NOT write plausible-sounding exam findings that are not in the transcript.
+   - Only include objective data that is EXPLICITLY stated in the transcript.
+
+3. ASSESSMENT & PLAN (COMBINED - PROBLEM-ORIENTED):
+   - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
+   - The "assessmentPlan" field must be generated FROM the "ap" array entries.
+   - Format assessmentPlan as:
+     Problem 1: <problem name>
+     Assessment: <one sentence clinical assessment>
+     Plan:
+     - bullet item
+     - bullet item
+     
+     Problem 2: <problem name>
+     Assessment: <one sentence clinical assessment>
+     Plan:
+     - bullet item
+   
+   - If only ONE problem exists, still format the same way with one entry.
+   - Do NOT merge multiple problems into one generic plan.
+   - BAD: "I am assessing the patient for..."
+   - GOOD: "Problem 1: Hypertension, uncontrolled\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"
+
+4. You must output ONLY valid JSON matching this exact structure:
+{
+  "soap3": {
+    "subjective": "string",
+    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
+    "assessmentPlan": "string - formatted problem-oriented A/P"
+  },
+  "ap": [
+    {
+      "problem": "string - problem name",
+      "assessment": "string - one sentence assessment",
+      "plan": ["string - plan item 1", "string - plan item 2"]
+    }
+  ],
+  "markdown": "formatted markdown note with ## headers"
+}
+
+5. The markdown field should be:
    ## Subjective
    [content]
    
@@ -169,13 +254,13 @@ ${preferenceInstructions}
    [content]
    
    ## Assessment & Plan
-   [content]`;
+   [problem-oriented content matching assessmentPlan field]`;
 };
 
-const buildProblemOrientedSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+const buildProblemOrientedFourFieldPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
   const detailSentences = prefs.detailLevel === 'Brief' ? '1-2' : prefs.detailLevel === 'Detailed' ? '4-6' : '3-4';
   
-  return `You are an expert medical scribe assistant. Your task is to generate a PROBLEM-ORIENTED clinical note from encounter transcripts with 3 sections: Subjective, Objective, and Assessment/Plan.
+  return `You are an expert medical scribe assistant. Your task is to generate a PROBLEM-ORIENTED clinical note from encounter transcripts with 4 sections: Subjective, Objective, Assessment, and Plan.
 
 ## PHYSICIAN PREFERENCES (apply these strictly):
 ${preferenceInstructions}
@@ -198,36 +283,105 @@ ${preferenceInstructions}
    - If objective findings ARE present, organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.) using ONLY stated findings.
    - Do NOT write plausible-sounding exam findings that are not in the transcript.
 
-4. ASSESSMENT AND PLAN (Combined, Problem-Oriented Format):
-   - Create a NUMBERED problem list with assessment and plan combined for each.
-   - For each problem include:
-     - Problem name/diagnosis with assessment
-     - Plan: ${prefs.planFormat === 'Bullets' ? 'Format as bullet list with "- " prefix.' : 'Write as a flowing paragraph.'}
+4. ASSESSMENT (Problem-Oriented Format):
+   - Create a NUMBERED problem list with clinical impression for each.
+   ${prefs.assessmentProblemList ? '- Format as numbered list.' : '- Write as clinical narrative.'}
+
+5. PLAN (Problem-Oriented Format):
+   - For each problem include plan items.
+   ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
    ${prefs.includeFollowUpLine ? '- If follow-up timing not stated, end with "Follow up as needed."' : '- Only include follow-up if explicitly stated in transcript.'}
 
-5. You must output ONLY valid JSON matching this exact structure:
+6. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
     "subjective": "string - full subjective content (problem-oriented format)",
     "objective": "string - exam findings OR 'Not documented.' if none in transcript",
-    "assessmentPlan": "string - combined assessment and plan (problem-oriented)"
+    "assessment": "string - problem list or clinical narrative",
+    "plan": "string - plan items"
   },
   "markdown": "formatted problem-oriented markdown note"
 }
 
-6. The markdown field should be formatted as:
+7. The markdown field should be formatted as:
    ## Subjective
    [problem-oriented subjective content - use ### Problem Name headers if multiple problems]
    
    ## Objective
    [system-based findings OR "Not documented."]
    
-   ## Assessment & Plan
+   ## Assessment
    1. **Problem Name** - [assessment text]
-      - Plan: [plan items]
-   
    2. **Next Problem** - [assessment text]
-      - Plan: [plan items]`;
+   
+   ## Plan
+   - [plan items organized by problem if multiple]`;
+};
+
+const buildProblemOrientedThreeFieldPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+  const detailSentences = prefs.detailLevel === 'Brief' ? '1-2' : prefs.detailLevel === 'Detailed' ? '4-6' : '3-4';
+  
+  return `You are an expert medical scribe assistant. Your task is to generate a PROBLEM-ORIENTED clinical note from encounter transcripts with 3 sections: Subjective, Objective, and Assessment & Plan (combined).
+
+## PHYSICIAN PREFERENCES (apply these strictly):
+${preferenceInstructions}
+
+## CRITICAL INSTRUCTIONS:
+
+1. TRANSCRIPT-ONLY CONSTRAINT:
+   - Only include information explicitly present in the transcript.
+   - Do NOT invent or extrapolate clinical information.
+
+2. SUBJECTIVE (Problem-Oriented Format):
+   - If multiple problems are evident in the transcript, organize by problem headings.
+   - If only one problem, use a single concise paragraph.
+   - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
+   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+
+3. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
+   - Do NOT invent or hallucinate objective data.
+   - If the transcript does NOT explicitly include objective findings, you MUST set objective to exactly: "Not documented."
+   - If objective findings ARE present, organize by system using ONLY stated findings.
+
+4. ASSESSMENT & PLAN (Combined, Problem-Oriented Format):
+   - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
+   - The "assessmentPlan" field must be generated FROM the "ap" array entries.
+   - Format assessmentPlan as:
+     Problem 1: <problem name>
+     Assessment: <one sentence clinical assessment>
+     Plan:
+     - bullet item
+     - bullet item
+   
+   - If only ONE problem exists, still format the same way.
+   ${prefs.includeFollowUpLine ? '- End each problem\'s plan with follow-up if stated, or add "Follow up as needed." for last problem.' : '- Only include follow-up if explicitly stated in transcript.'}
+
+5. You must output ONLY valid JSON matching this exact structure:
+{
+  "soap3": {
+    "subjective": "string - problem-oriented subjective",
+    "objective": "string - exam findings OR 'Not documented.'",
+    "assessmentPlan": "string - problem-oriented A/P"
+  },
+  "ap": [
+    {
+      "problem": "string",
+      "assessment": "string",
+      "plan": ["string", "string"]
+    }
+  ],
+  "markdown": "formatted problem-oriented markdown note"
+}
+
+6. The markdown field should be:
+   ## Subjective
+   [problem-oriented content]
+   
+   ## Objective
+   [system-based findings OR "Not documented."]
+   
+   ## Assessment & Plan
+   [problem-oriented A/P matching assessmentPlan field]`;
 };
 
 serve(async (req) => {
@@ -251,7 +405,8 @@ serve(async (req) => {
       noteType,
       transcriptLength: transcript?.length ?? 0,
       hasPreferences: !!rawPreferences,
-      preferences,
+      noteEditorMode: preferences.noteEditorMode,
+      noteStructure: preferences.noteStructure,
     });
 
     // Use OpenAI API directly
@@ -290,15 +445,24 @@ ${chronicConditions.map((c: any) => `- ${c.condition_name}${c.icd_code ? ` (${c.
 
     const preferenceInstructions = buildPreferenceInstructions(preferences);
 
-    // For SOAP note types (both SOAP and Problem-Oriented use structured JSON output with 3 fields)
+    // For SOAP note types
     if (noteType === 'SOAP') {
       const isProblemOriented = preferences.noteStructure === 'Problem-Oriented';
+      const is4Field = preferences.noteEditorMode === 'SOAP_4_FIELD';
       
-      const soapSystemPrompt = isProblemOriented
-        ? buildProblemOrientedSystemPrompt(preferences, preferenceInstructions)
-        : buildThreeFieldSystemPrompt(preferences, preferenceInstructions);
+      // Select the right prompt based on mode and structure
+      let systemPrompt: string;
+      if (is4Field) {
+        systemPrompt = isProblemOriented
+          ? buildProblemOrientedFourFieldPrompt(preferences, preferenceInstructions)
+          : buildFourFieldSystemPrompt(preferences, preferenceInstructions);
+      } else {
+        systemPrompt = isProblemOriented
+          ? buildProblemOrientedThreeFieldPrompt(preferences, preferenceInstructions)
+          : buildThreeFieldSystemPrompt(preferences, preferenceInstructions);
+      }
 
-      const soapUserPrompt = `Generate a ${isProblemOriented ? 'Problem-Oriented' : 'clinical'} note from this encounter.
+      const userPrompt = `Generate a ${isProblemOriented ? 'Problem-Oriented' : 'clinical'} note from this encounter.
 
 ## Patient Context:
 ${patientContext || 'No additional context provided'}
@@ -316,11 +480,13 @@ ${transcript}
 Remember: 
 - Apply the physician preferences strictly.
 - For Objective: ONLY include findings explicitly stated in the transcript. If no objective data is mentioned, write "Not documented."
-- Output ONLY valid JSON with "soap" object (subjective, objective, assessmentPlan) and "markdown" string.`;
+- Output mode: ${is4Field ? 'SOAP_4_FIELD (4 separate fields: S, O, A, P)' : 'SOAP_3_FIELD (3 fields: S, O, A/P combined)'}
+- Output ONLY valid JSON.`;
 
       console.log('[generate-note] Calling OpenAI API:', {
         model: 'gpt-4o-mini',
         isProblemOriented,
+        is4Field,
       });
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -332,8 +498,8 @@ Remember:
         body: JSON.stringify({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: soapSystemPrompt },
-            { role: 'user', content: soapUserPrompt }
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
           ],
           temperature: 0.3,
           max_tokens: 4000,
@@ -421,13 +587,53 @@ Remember:
         );
       }
 
-      // Validate the structure - now expecting 3 fields
-      const soap = parsed?.soap;
-      if (!soap || 
-          typeof soap.subjective !== 'string' ||
-          typeof soap.objective !== 'string' ||
-          typeof soap.assessmentPlan !== 'string') {
-        console.error('[generate-note] Invalid note structure:', parsed);
+      // =====================================================
+      // SOAP_4_FIELD: Validate and return 4-field structure
+      // =====================================================
+      if (is4Field) {
+        const soap = parsed?.soap;
+        if (!soap || 
+            typeof soap.subjective !== 'string' ||
+            typeof soap.objective !== 'string' ||
+            typeof soap.assessment !== 'string' ||
+            typeof soap.plan !== 'string') {
+          console.error('[generate-note] Invalid 4-field note structure:', parsed);
+          return buildErrorResponse(
+            'Invalid note structure from AI',
+            500,
+            { 
+              message: 'Missing or invalid fields (subjective, objective, assessment, plan)',
+              details: JSON.stringify(parsed).slice(0, 500)
+            }
+          );
+        }
+
+        const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
+          `## Subjective\n${soap.subjective}\n\n## Objective\n${soap.objective}\n\n## Assessment\n${soap.assessment}\n\n## Plan\n${soap.plan}`;
+
+        console.log('[generate-note] SOAP_4_FIELD note generated successfully');
+
+        return new Response(JSON.stringify({ 
+          noteType: 'SOAP_4_FIELD',
+          note: markdown,
+          markdown: markdown,
+          soap: soap // Contains: subjective, objective, assessment, plan
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // =====================================================
+      // SOAP_3_FIELD: Validate and return 3-field structure
+      // =====================================================
+      const soap3 = parsed?.soap3;
+      const ap = parsed?.ap;
+      
+      if (!soap3 || 
+          typeof soap3.subjective !== 'string' ||
+          typeof soap3.objective !== 'string' ||
+          typeof soap3.assessmentPlan !== 'string') {
+        console.error('[generate-note] Invalid 3-field note structure:', parsed);
         return buildErrorResponse(
           'Invalid note structure from AI',
           500,
@@ -438,16 +644,32 @@ Remember:
         );
       }
 
-      const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
-        `## Subjective\n${soap.subjective}\n\n## Objective\n${soap.objective}\n\n## Assessment & Plan\n${soap.assessmentPlan}`;
+      // Validate ap array if present
+      let validatedAp: Array<{ problem: string; assessment: string; plan: string[] }> = [];
+      if (Array.isArray(ap)) {
+        validatedAp = ap.filter(entry => 
+          entry && 
+          typeof entry.problem === 'string' && 
+          typeof entry.assessment === 'string' &&
+          Array.isArray(entry.plan)
+        ).map(entry => ({
+          problem: entry.problem,
+          assessment: entry.assessment,
+          plan: entry.plan.map((p: any) => String(p))
+        }));
+      }
 
-      console.log('[generate-note] Note generated successfully with 3 fields');
+      const markdown = typeof parsed.markdown === 'string' ? parsed.markdown : 
+        `## Subjective\n${soap3.subjective}\n\n## Objective\n${soap3.objective}\n\n## Assessment & Plan\n${soap3.assessmentPlan}`;
+
+      console.log('[generate-note] SOAP_3_FIELD note generated successfully with', validatedAp.length, 'problems');
 
       return new Response(JSON.stringify({ 
-        noteType: 'SOAP',
+        noteType: 'SOAP_3_FIELD',
         note: markdown,
         markdown: markdown,
-        soap: soap // Contains: subjective, objective, assessmentPlan
+        soap3: soap3, // Contains: subjective, objective, assessmentPlan
+        ap: validatedAp
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
