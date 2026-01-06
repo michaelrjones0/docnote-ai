@@ -482,31 +482,60 @@ async function fetchTranscriptFromS3(
 }
 
 serve(async (req) => {
+  // Get CORS headers immediately - ensures headers exist on ALL responses
   const origin = req.headers.get('Origin');
   const corsHeaders = getCorsHeaders(origin);
 
+  // Handle CORS preflight OPTIONS request
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { 
+      status: 204, 
+      headers: corsHeaders 
+    });
   }
 
-  // Verify JWT
-  const authResult = await verifyJWT(req);
-  if (!authResult) {
-    return new Response(
-      JSON.stringify({ error: 'Unauthorized: valid JWT required' }),
-      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  }
-
+  // Wrap entire handler in try-catch to ensure CORS headers on ALL errors
   try {
-    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex } = await req.json();
+    // Verify JWT
+    const authResult = await verifyJWT(req);
+    if (!authResult) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: valid JWT required', code: 'AUTH_REQUIRED' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Parse request body
+    let requestBody;
+    try {
+      requestBody = await req.json();
+    } catch (parseError) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON in request body', code: 'INVALID_REQUEST' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex } = requestBody;
     
     if (!audio) {
-      throw new Error('No audio data provided');
+      return new Response(
+        JSON.stringify({ error: 'No audio data provided', code: 'MISSING_AUDIO' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Get validated AWS configuration
-    const awsConfig = getAwsConfig();
+    let awsConfig;
+    try {
+      awsConfig = getAwsConfig();
+    } catch (configError) {
+      console.error('AWS config error:', configError);
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error', code: 'CONFIG_ERROR' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     console.log(`[${authResult.userId}] Processing live audio chunk ${chunkIndex ?? 'N/A'}, encoding: ${encoding}, sampleRate: ${sampleRate}...`);
 
@@ -585,12 +614,24 @@ serve(async (req) => {
           segments = parsed.segments;
         } catch (fetchError) {
           console.error('Failed to fetch transcript from S3:', fetchError);
-          throw new Error(`Failed to fetch transcript: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`);
+          return new Response(
+            JSON.stringify({ 
+              error: `Failed to fetch transcript: ${fetchError instanceof Error ? fetchError.message : 'Unknown error'}`,
+              code: 'TRANSCRIPT_FETCH_ERROR'
+            }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
         }
         break;
       } else if (jobStatus.status === 'FAILED') {
         console.error('Medical transcription job failed:', jobStatus.failureReason);
-        throw new Error(`Transcription failed: ${jobStatus.failureReason}`);
+        return new Response(
+          JSON.stringify({ 
+            error: `Transcription failed: ${jobStatus.failureReason}`,
+            code: 'TRANSCRIPTION_FAILED'
+          }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
     }
 
@@ -613,9 +654,13 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    // Catch-all error handler - ALWAYS includes CORS headers
     console.error('Error in transcribe-audio-live:', error);
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        code: 'INTERNAL_ERROR'
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
