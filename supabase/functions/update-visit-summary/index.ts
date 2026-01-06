@@ -8,6 +8,36 @@ const corsHeaders = {
 // Timeout for AI gateway call (30 seconds)
 const AI_TIMEOUT_MS = 30000;
 
+// Dev mode check - include detailed errors in response when not in production
+const isDevMode = () => {
+  const env = Deno.env.get('ENV') || Deno.env.get('DENO_ENV') || '';
+  const devFlag = Deno.env.get('DEV_MODE');
+  return devFlag === 'true' || (env !== 'production' && env !== 'prod');
+};
+
+// Helper to build error response with dev-only details
+const buildErrorResponse = (
+  genericMessage: string,
+  status: number,
+  devDetails?: { message?: string; stack?: string; details?: string }
+) => {
+  const isDev = isDevMode();
+  const responseBody: Record<string, unknown> = { error: genericMessage };
+  
+  if (isDev && devDetails) {
+    responseBody.dev = {
+      message: devDetails.message,
+      stack: devDetails.stack?.slice(0, 500),
+      details: devDetails.details?.slice(0, 1000),
+    };
+  }
+  
+  return new Response(
+    JSON.stringify(responseBody),
+    { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+};
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -128,30 +158,35 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
 
     if (!aiResponse.ok) {
       const errorText = await aiResponse.text();
-      console.error('[update-visit-summary] AI Gateway error:', aiResponse.status, errorText);
+      // Always log full error server-side
+      console.error('[update-visit-summary] AI Gateway error:', {
+        status: aiResponse.status,
+        statusText: aiResponse.statusText,
+        errorBody: errorText,
+      });
       
       // Handle rate limiting
       if (aiResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Rate limit exceeded, please try again later' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        return buildErrorResponse(
+          'Rate limit exceeded, please try again later',
+          429,
+          { details: errorText }
         );
       }
       
       // Handle payment required
       if (aiResponse.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'AI credits exhausted, please add funds' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        return buildErrorResponse(
+          'AI credits exhausted, please add funds',
+          402,
+          { details: errorText }
         );
       }
       
-      return new Response(
-        JSON.stringify({ 
-          error: `AI Gateway error: ${aiResponse.status}`,
-          details: errorText.slice(0, 500)
-        }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      return buildErrorResponse(
+        'Failed to generate summary',
+        500,
+        { message: `AI Gateway error: ${aiResponse.status}`, details: errorText }
       );
     }
 
@@ -161,10 +196,12 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
     const newSummary = aiData.choices?.[0]?.message?.content?.trim() || '';
 
     if (!newSummary) {
-      console.error('[update-visit-summary] Empty summary from AI:', JSON.stringify(aiData).slice(0, 500));
-      return new Response(
-        JSON.stringify({ error: 'AI returned empty summary' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      const aiDataStr = JSON.stringify(aiData).slice(0, 1000);
+      console.error('[update-visit-summary] Empty summary from AI. Full response:', aiDataStr);
+      return buildErrorResponse(
+        'AI returned empty summary',
+        500,
+        { message: 'No content in AI response', details: aiDataStr }
       );
     }
 
@@ -186,13 +223,20 @@ Output ONLY the updated running summary text. No JSON, no markdown headers, just
     );
 
   } catch (error) {
-    console.error('[update-visit-summary] Unhandled error:', error);
-    return new Response(
-      JSON.stringify({ 
-        error: error instanceof Error ? error.message : 'Unknown server error',
-        stack: error instanceof Error ? error.stack?.slice(0, 300) : undefined
-      }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    // Always log full error server-side
+    console.error('[update-visit-summary] Unhandled error:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+      error,
+    });
+    
+    return buildErrorResponse(
+      'An unexpected error occurred',
+      500,
+      {
+        message: error instanceof Error ? error.message : 'Unknown server error',
+        stack: error instanceof Error ? error.stack : undefined,
+      }
     );
   }
 });
