@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause } from 'lucide-react';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
@@ -516,6 +516,7 @@ const AppHome = () => {
                 {/* Timer display - always visible to prevent layout shift */}
                 <span className={`text-sm font-mono tabular-nums ${
                   liveScribe.status === 'recording' ? 'text-red-600 dark:text-red-400' :
+                  liveScribe.status === 'paused' ? 'text-amber-600 dark:text-amber-400' :
                   liveScribe.status === 'finalizing' ? 'text-amber-600 dark:text-amber-400' :
                   'text-muted-foreground'
                 }`}>
@@ -524,12 +525,14 @@ const AppHome = () => {
                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                   liveScribe.status === 'idle' ? 'bg-muted text-muted-foreground' :
                   liveScribe.status === 'recording' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 animate-pulse' :
+                  liveScribe.status === 'paused' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
                   liveScribe.status === 'finalizing' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
                   liveScribe.status === 'done' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
                   'bg-red-100 text-red-700'
                 }`}>
                   {liveScribe.status === 'idle' && 'Idle'}
                   {liveScribe.status === 'recording' && '● Recording'}
+                  {liveScribe.status === 'paused' && '⏸ Paused'}
                   {liveScribe.status === 'finalizing' && 'Finalizing'}
                   {liveScribe.status === 'done' && 'Done'}
                   {liveScribe.status === 'error' && 'Error'}
@@ -563,29 +566,79 @@ const AppHome = () => {
               </Select>
             </div>
 
+            {/* Recording Controls - context-sensitive based on status */}
             <div className="flex gap-3">
-              <Button
-                onClick={handleStartLiveScribe}
-                disabled={liveScribe.status === 'recording' || liveScribe.status === 'finalizing'}
-                variant="default"
-                className="flex-1"
-              >
-                <Mic className="h-4 w-4 mr-2" />
-                Start Live Recording
-              </Button>
-              <Button
-                onClick={handleStopLiveScribe}
-                disabled={liveScribe.status !== 'recording'}
-                variant="destructive"
-                className="flex-1"
-              >
-                <Square className="h-4 w-4 mr-2" />
-                Stop Recording
-              </Button>
+              {/* Idle state: Show Start button */}
+              {(liveScribe.status === 'idle' || liveScribe.status === 'done' || liveScribe.status === 'error') && (
+                <Button
+                  onClick={handleStartLiveScribe}
+                  variant="default"
+                  className="flex-1"
+                >
+                  <Mic className="h-4 w-4 mr-2" />
+                  Start Live Recording
+                </Button>
+              )}
+              
+              {/* Recording state: Show Pause and Stop buttons */}
+              {liveScribe.status === 'recording' && (
+                <>
+                  <Button
+                    onClick={() => liveScribe.pauseRecording()}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    <Pause className="h-4 w-4 mr-2" />
+                    Pause
+                  </Button>
+                  <Button
+                    onClick={handleStopLiveScribe}
+                    variant="destructive"
+                    className="flex-1"
+                  >
+                    <Square className="h-4 w-4 mr-2" />
+                    Stop Recording
+                  </Button>
+                </>
+              )}
+              
+              {/* Paused state: Show Resume and Stop buttons */}
+              {liveScribe.status === 'paused' && (
+                <>
+                  <Button
+                    onClick={() => liveScribe.resumeRecording()}
+                    variant="default"
+                    className="flex-1"
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    Resume
+                  </Button>
+                  <Button
+                    onClick={handleStopLiveScribe}
+                    variant="destructive"
+                    className="flex-1"
+                  >
+                    <Square className="h-4 w-4 mr-2" />
+                    Stop Recording
+                  </Button>
+                </>
+              )}
+              
+              {/* Finalizing state: Show disabled state */}
+              {liveScribe.status === 'finalizing' && (
+                <Button
+                  disabled
+                  variant="outline"
+                  className="flex-1"
+                >
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Finalizing...
+                </Button>
+              )}
             </div>
 
-            {/* Running Summary Panel (Option B only) */}
-            {docSession.liveDraftMode === 'B' && (liveScribe.status === 'recording' || docSession.runningSummary) && (
+            {/* Running Summary Panel (Option B only) - show during recording, paused, or if summary exists */}
+            {docSession.liveDraftMode === 'B' && (liveScribe.status === 'recording' || liveScribe.status === 'paused' || docSession.runningSummary) && (
               <div className="space-y-2 p-4 rounded-lg border-2 border-primary/30 bg-primary/5">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-medium flex items-center gap-2">
@@ -593,6 +646,9 @@ const AppHome = () => {
                     Running Summary
                     {liveScribe.status === 'recording' && (
                       <span className="text-xs text-muted-foreground">(updates every ~75s)</span>
+                    )}
+                    {liveScribe.status === 'paused' && (
+                      <span className="text-xs text-muted-foreground">(paused)</span>
                     )}
                   </Label>
                   {docSession.runningSummary && (
@@ -617,15 +673,18 @@ const AppHome = () => {
               </div>
             )}
 
-            {/* Live Transcript Display */}
-            {(liveScribe.status === 'recording' || liveScribe.transcript) && (
+            {/* Live Transcript Display - show during recording, paused, or if transcript exists */}
+            {(liveScribe.status === 'recording' || liveScribe.status === 'paused' || liveScribe.transcript) && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium">Live Transcript</Label>
+                <Label className="text-sm font-medium">
+                  Live Transcript
+                  {liveScribe.status === 'paused' && <span className="text-xs text-muted-foreground ml-2">(paused)</span>}
+                </Label>
                 <pre 
                   ref={liveTranscriptRef}
                   className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-48 whitespace-pre-wrap font-mono border"
                 >
-                  {liveScribe.transcript || (liveScribe.status === 'recording' ? 'Listening...' : '')}
+                  {liveScribe.transcript || (liveScribe.status === 'recording' ? 'Listening...' : liveScribe.status === 'paused' ? 'Paused...' : '')}
                 </pre>
               </div>
             )}
