@@ -7,7 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
+import { useDocNoteSession } from '@/hooks/useDocNoteSession';
 
 interface SoapData {
   subjective: string;
@@ -32,12 +34,27 @@ const AppHome = () => {
   const [isTestingAuth, setIsTestingAuth] = useState(false);
   const [batchStatusResult, setBatchStatusResult] = useState<string | null>(null);
   const [isTestingBatchStatus, setIsTestingBatchStatus] = useState(false);
-  const [jobName, setJobName] = useState('');
   const [startBatchResult, setStartBatchResult] = useState<string | null>(null);
   const [isStartingBatch, setIsStartingBatch] = useState(false);
-  const [soapResult, setSoapResult] = useState<SoapResponse | null>(null);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const {
+    session: docSession,
+    showConflictBanner,
+    setJobName,
+    setTranscriptText,
+    setMarkdownExpanded,
+    handleNewGenerated,
+    acceptNewGenerated,
+    keepUserEdits,
+    editSoapField,
+    syncMarkdownFromSoap,
+    clearSession,
+    getCurrentSoap,
+    getCurrentMarkdown,
+    getExportJson,
+  } = useDocNoteSession();
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -93,7 +110,7 @@ const AppHome = () => {
   };
 
   const handleTestBatchStatus = async (overrideJobName?: string) => {
-    const jobNameToUse = overrideJobName ?? jobName;
+    const jobNameToUse = overrideJobName ?? docSession.jobName ?? '';
     if (!session?.access_token) {
       setBatchStatusResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
       return;
@@ -117,6 +134,12 @@ const AppHome = () => {
 
       const data = await response.json();
       setBatchStatusResult(JSON.stringify(data, null, 2));
+      
+      // Extract and persist transcript text
+      const text = (data?.text ?? data?.result?.text) ?? '';
+      if (typeof text === 'string' && text.trim()) {
+        setTranscriptText(text.trim());
+      }
     } catch (err) {
       setBatchStatusResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
     } finally {
@@ -163,20 +186,8 @@ const AppHome = () => {
     }
   };
 
-  const getTranscriptFromBatchStatus = (): string => {
-    if (!batchStatusResult) return '';
-    try {
-      const parsed = JSON.parse(batchStatusResult);
-      // Check both direct .text and nested .result.text
-      const text = (parsed?.text ?? parsed?.result?.text) ?? '';
-      return typeof text === 'string' ? text.trim() : '';
-    } catch {
-      return '';
-    }
-  };
-
   const handleGenerateSoap = async () => {
-    const transcript = getTranscriptFromBatchStatus();
+    const transcript = docSession.transcriptText;
     if (!transcript) {
       toast({
         title: 'No transcript available',
@@ -187,7 +198,6 @@ const AppHome = () => {
     }
 
     setIsGeneratingSoap(true);
-    setSoapResult(null);
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-note', {
@@ -198,12 +208,28 @@ const AppHome = () => {
       });
 
       if (error) {
-        setSoapResult({ error: error.message } as SoapResponse);
-      } else {
-        setSoapResult(data as SoapResponse);
+        toast({
+          title: 'Generation failed',
+          description: error.message,
+          variant: 'destructive',
+        });
+      } else if (data?.soap) {
+        handleNewGenerated({
+          noteType: data.noteType || 'SOAP',
+          soap: data.soap,
+          markdown: data.markdown || data.note || '',
+        });
+        toast({
+          title: 'SOAP note generated',
+          description: 'Your note has been generated successfully.',
+        });
       }
     } catch (err) {
-      setSoapResult({ error: String(err) } as SoapResponse);
+      toast({
+        title: 'Generation failed',
+        description: String(err),
+        variant: 'destructive',
+      });
     } finally {
       setIsGeneratingSoap(false);
     }
@@ -233,6 +259,7 @@ const AppHome = () => {
       size="sm"
       onClick={() => copyToClipboard(text, label)}
       className="flex items-center gap-1"
+      disabled={!text}
     >
       {copiedField === label ? (
         <Check className="h-3 w-3" />
@@ -242,6 +269,17 @@ const AppHome = () => {
       {label}
     </Button>
   );
+
+  const handleClearSession = () => {
+    clearSession();
+    setBatchStatusResult(null);
+    setStartBatchResult(null);
+    setAuthCheckResult(null);
+    toast({
+      title: 'Session cleared',
+      description: 'All data has been cleared.',
+    });
+  };
 
   if (isLoading) {
     return (
@@ -255,7 +293,9 @@ const AppHome = () => {
     return null;
   }
 
-  const transcript = getTranscriptFromBatchStatus();
+  const currentSoap = getCurrentSoap();
+  const currentMarkdown = getCurrentMarkdown();
+  const exportJson = getExportJson();
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -267,6 +307,10 @@ const AppHome = () => {
               <CardTitle className="text-xl">DocNoteAI</CardTitle>
               <div className="flex items-center gap-4">
                 <span className="text-sm text-muted-foreground">{user.email}</span>
+                <Button onClick={handleClearSession} variant="outline" size="sm">
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Clear Session
+                </Button>
                 <Button onClick={handleLogout} variant="outline" size="sm">
                   <LogOut className="h-4 w-4 mr-2" />
                   Log Out
@@ -275,6 +319,38 @@ const AppHome = () => {
             </div>
           </CardHeader>
         </Card>
+
+        {/* Conflict Banner */}
+        {showConflictBanner && (
+          <Card className="border-amber-500 bg-amber-50 dark:bg-amber-950/20">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  <span className="text-sm font-medium">
+                    New AI note generated. Replace your edits?
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={keepUserEdits}
+                  >
+                    Keep my edits
+                  </Button>
+                  <Button 
+                    variant="default" 
+                    size="sm" 
+                    onClick={acceptNewGenerated}
+                  >
+                    Replace edits
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Controls */}
         <Card>
@@ -324,14 +400,14 @@ const AppHome = () => {
                 <Input
                   id="jobName"
                   placeholder="Enter jobName..."
-                  value={jobName}
+                  value={docSession.jobName ?? ''}
                   onChange={(e) => setJobName(e.target.value)}
                   className="font-mono"
                 />
               </div>
               <Button 
                 onClick={() => handleTestBatchStatus()} 
-                disabled={isTestingBatchStatus || !jobName.trim()}
+                disabled={isTestingBatchStatus || !docSession.jobName?.trim()}
               >
                 {isTestingBatchStatus ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -350,7 +426,7 @@ const AppHome = () => {
 
             <Button 
               onClick={handleGenerateSoap} 
-              disabled={isGeneratingSoap || !transcript} 
+              disabled={isGeneratingSoap || !docSession.transcriptText} 
               className="w-full"
               variant="default"
             >
@@ -359,7 +435,7 @@ const AppHome = () => {
               ) : (
                 <FileText className="h-4 w-4 mr-2" />
               )}
-              {!transcript ? 'No transcript available' : 'Generate SOAP'}
+              {!docSession.transcriptText ? 'No transcript available' : 'Generate SOAP'}
             </Button>
           </CardContent>
         </Card>
@@ -369,15 +445,15 @@ const AppHome = () => {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg">Transcript</CardTitle>
-              {transcript && (
-                <CopyButton text={transcript} label="Copy Transcript" />
+              {docSession.transcriptText && (
+                <CopyButton text={docSession.transcriptText} label="Copy Transcript" />
               )}
             </div>
           </CardHeader>
           <CardContent>
-            {transcript ? (
+            {docSession.transcriptText ? (
               <pre className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-64 whitespace-pre-wrap font-mono border">
-                {transcript}
+                {docSession.transcriptText}
               </pre>
             ) : (
               <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
@@ -392,14 +468,14 @@ const AppHome = () => {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-lg">SOAP Note</CardTitle>
-              {soapResult && !soapResult.error && (
+              {currentSoap && (
                 <div className="flex gap-2">
                   <CopyButton 
-                    text={soapResult.markdown || soapResult.note || ''} 
+                    text={currentMarkdown} 
                     label="Copy SOAP" 
                   />
                   <CopyButton 
-                    text={JSON.stringify(soapResult, null, 2)} 
+                    text={exportJson} 
                     label="Copy JSON" 
                   />
                 </div>
@@ -407,52 +483,88 @@ const AppHome = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {soapResult?.error ? (
-              <div className="bg-destructive/10 border border-destructive/20 p-4 rounded-md text-destructive">
-                Error: {soapResult.error}
-              </div>
-            ) : soapResult?.soap ? (
+            {currentSoap ? (
               <div className="space-y-4">
-                {/* Structured SOAP Cards */}
+                {/* Editable SOAP Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Subjective</h4>
-                    <p className="text-sm whitespace-pre-wrap">
-                      {soapResult.soap.subjective || 'Not documented.'}
-                    </p>
+                    <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Subjective
+                    </Label>
+                    <Textarea
+                      id="soap-subjective"
+                      value={currentSoap.subjective || ''}
+                      onChange={(e) => editSoapField('subjective', e.target.value)}
+                      placeholder="Not documented."
+                      className="min-h-[100px] resize-y"
+                    />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Objective</h4>
-                    <p className="text-sm whitespace-pre-wrap">
-                      {soapResult.soap.objective || 'Not documented.'}
-                    </p>
+                    <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Objective
+                    </Label>
+                    <Textarea
+                      id="soap-objective"
+                      value={currentSoap.objective || ''}
+                      onChange={(e) => editSoapField('objective', e.target.value)}
+                      placeholder="Not documented."
+                      className="min-h-[100px] resize-y"
+                    />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Assessment</h4>
-                    <p className="text-sm whitespace-pre-wrap">
-                      {soapResult.soap.assessment || 'Not documented.'}
-                    </p>
+                    <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Assessment
+                    </Label>
+                    <Textarea
+                      id="soap-assessment"
+                      value={currentSoap.assessment || ''}
+                      onChange={(e) => editSoapField('assessment', e.target.value)}
+                      placeholder="Not documented."
+                      className="min-h-[100px] resize-y"
+                    />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <h4 className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide">Plan</h4>
-                    <p className="text-sm whitespace-pre-wrap">
-                      {soapResult.soap.plan || 'Not documented.'}
-                    </p>
+                    <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
+                      Plan
+                    </Label>
+                    <Textarea
+                      id="soap-plan"
+                      value={currentSoap.plan || ''}
+                      onChange={(e) => editSoapField('plan', e.target.value)}
+                      placeholder="Not documented."
+                      className="min-h-[100px] resize-y"
+                    />
                   </div>
                 </div>
 
                 {/* Markdown Preview */}
-                <details className="text-sm">
-                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground font-medium">
-                    View Formatted Markdown
-                  </summary>
-                  <pre className="mt-3 bg-muted p-4 rounded-md overflow-auto max-h-64 whitespace-pre-wrap font-mono border">
-                    {soapResult.markdown || soapResult.note}
-                  </pre>
-                </details>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <button 
+                      onClick={() => setMarkdownExpanded(!docSession.markdownExpanded)}
+                      className="text-sm text-muted-foreground hover:text-foreground font-medium cursor-pointer"
+                    >
+                      {docSession.markdownExpanded ? '▼' : '▶'} View Formatted Markdown
+                    </button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={syncMarkdownFromSoap}
+                      className="flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Sync Markdown from SOAP
+                    </Button>
+                  </div>
+                  {docSession.markdownExpanded && (
+                    <pre className="bg-muted p-4 rounded-md overflow-auto max-h-64 whitespace-pre-wrap font-mono border text-sm">
+                      {currentMarkdown || 'No markdown available.'}
+                    </pre>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="bg-muted/50 p-4 rounded-md text-center text-muted-foreground">
