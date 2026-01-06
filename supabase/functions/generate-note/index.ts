@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getCorsHeaders } from "../_shared/env.ts";
+import { requireUser, isAuthError } from "../_shared/auth.ts";
 
 // Dev mode check - include detailed errors in response when not in production
 const isDevMode = () => {
@@ -396,6 +397,12 @@ serve(async (req) => {
       JSON.stringify({ error: 'Origin not allowed' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+  }
+
+  // Verify JWT using shared auth helper
+  const authResult = await requireUser(req, corsHeaders);
+  if (isAuthError(authResult)) {
+    return authResult.error;
   }
 
   try {

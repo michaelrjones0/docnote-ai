@@ -50,8 +50,12 @@ export function useNoteGeneration() {
     } catch (err) {
       safeErrorLog('[NoteGeneration] Error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to generate note';
-      setError(errorMessage);
-      throw err;
+      // Map auth errors to user-friendly messages
+      const userMessage = /unauthorized|401|invalid.*token|expired/i.test(errorMessage)
+        ? 'Session expired. Please log in again.'
+        : errorMessage;
+      setError(userMessage);
+      throw new Error(userMessage);
     } finally {
       setIsGenerating(false);
     }

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getCorsHeaders } from "../_shared/env.ts";
+import { requireUser, isAuthError } from "../_shared/auth.ts";
 
 serve(async (req) => {
   const origin = req.headers.get('Origin');
@@ -16,6 +17,12 @@ serve(async (req) => {
       JSON.stringify({ error: 'Origin not allowed' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
+  }
+
+  // Verify JWT using shared auth helper
+  const authResult = await requireUser(req, corsHeaders);
+  if (isAuthError(authResult)) {
+    return authResult.error;
   }
 
   try {
