@@ -51,6 +51,8 @@ const AppHome = () => {
     setJobName,
     setTranscriptText,
     setMarkdownExpanded,
+    setLiveDraftMode,
+    setRunningSummary,
     handleNewGenerated,
     acceptNewGenerated,
     keepUserEdits,
@@ -74,6 +76,9 @@ const AppHome = () => {
         }
       }, 50);
     },
+    onSummaryUpdate: (summary) => {
+      setRunningSummary(summary);
+    },
     onError: (err) => {
       toast({
         title: 'Live Scribe Error',
@@ -82,6 +87,8 @@ const AppHome = () => {
       });
     },
     chunkIntervalMs: 10000, // Send chunks every 10 seconds
+    liveDraftMode: docSession.liveDraftMode,
+    preferences,
   });
 
   const handleStartLiveScribe = async () => {
@@ -427,6 +434,31 @@ const AppHome = () => {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Live Draft Mode Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium">Live Draft Mode</Label>
+                <p className="text-xs text-muted-foreground">
+                  {docSession.liveDraftMode === 'A' 
+                    ? 'Final note generated after recording stops'
+                    : 'Running summary updates during recording'}
+                </p>
+              </div>
+              <Select
+                value={docSession.liveDraftMode}
+                onValueChange={(value: 'A' | 'B') => setLiveDraftMode(value)}
+                disabled={liveScribe.status === 'recording'}
+              >
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="A">Final Note Only (A)</SelectItem>
+                  <SelectItem value="B">Running Summary + Final (B)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="flex gap-3">
               <Button
                 onClick={handleStartLiveScribe}
@@ -447,6 +479,39 @@ const AppHome = () => {
                 Stop Recording
               </Button>
             </div>
+
+            {/* Running Summary Panel (Option B only) */}
+            {docSession.liveDraftMode === 'B' && (liveScribe.status === 'recording' || docSession.runningSummary) && (
+              <div className="space-y-2 p-4 rounded-lg border-2 border-primary/30 bg-primary/5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    Running Summary
+                    {liveScribe.status === 'recording' && (
+                      <span className="text-xs text-muted-foreground">(updates every ~75s)</span>
+                    )}
+                  </Label>
+                  {docSession.runningSummary && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard(docSession.runningSummary || '', 'Summary')}
+                      className="flex items-center gap-1"
+                    >
+                      {copiedField === 'Summary' ? (
+                        <Check className="h-3 w-3" />
+                      ) : (
+                        <Copy className="h-3 w-3" />
+                      )}
+                      Copy Summary
+                    </Button>
+                  )}
+                </div>
+                <pre className="bg-background p-4 rounded-md text-sm overflow-auto max-h-48 whitespace-pre-wrap font-mono border">
+                  {docSession.runningSummary || (liveScribe.status === 'recording' ? 'Summary will appear here...' : 'No summary yet.')}
+                </pre>
+              </div>
+            )}
 
             {/* Live Transcript Display */}
             {(liveScribe.status === 'recording' || liveScribe.transcript) && (
