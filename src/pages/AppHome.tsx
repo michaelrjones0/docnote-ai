@@ -1,15 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, LogOut } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck } from 'lucide-react';
 
 const AppHome = () => {
-  const { user, isLoading, signOut } = useAuth();
+  const { user, session, isLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [authCheckResult, setAuthCheckResult] = useState<string | null>(null);
+  const [isTestingAuth, setIsTestingAuth] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -31,6 +34,36 @@ const AppHome = () => {
         description: 'You have been successfully logged out.',
       });
       navigate('/');
+    }
+  };
+
+  const handleTestAuth = async () => {
+    if (!session?.access_token) {
+      setAuthCheckResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
+      return;
+    }
+
+    setIsTestingAuth(true);
+    setAuthCheckResult(null);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auth-check`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+      setAuthCheckResult(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setAuthCheckResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
+    } finally {
+      setIsTestingAuth(false);
     }
   };
 
@@ -56,6 +89,24 @@ const AppHome = () => {
           <p className="text-muted-foreground">
             Signed in as: <span className="font-medium text-foreground">{user.email}</span>
           </p>
+          
+          <div className="space-y-3">
+            <Button onClick={handleTestAuth} disabled={isTestingAuth} className="w-full">
+              {isTestingAuth ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <ShieldCheck className="h-4 w-4 mr-2" />
+              )}
+              Test Auth
+            </Button>
+            
+            {authCheckResult && (
+              <pre className="text-left bg-muted p-3 rounded-md text-sm overflow-auto max-h-40">
+                {authCheckResult}
+              </pre>
+            )}
+          </div>
+
           <Button onClick={handleLogout} variant="outline" className="w-full">
             <LogOut className="h-4 w-4 mr-2" />
             Log Out
