@@ -489,8 +489,8 @@ const AppHome = () => {
           <CardContent>
             {currentSoap ? (
               <div className="space-y-4">
-                {/* Editable SOAP Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Editable SOAP Cards - Vertical Stack */}
+                <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
                     <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary mb-2 uppercase tracking-wide block">
                       Subjective

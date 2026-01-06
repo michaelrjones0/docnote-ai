@@ -144,18 +144,36 @@ export const useDocNoteSession = () => {
     }
   }, [pendingGenerated, updateSession]);
 
-  // Edit a specific SOAP field
+  // Build markdown from SOAP fields
+  const buildMarkdownFromSoap = (soap: SoapData): string => {
+    return `## Subjective
+${soap.subjective || 'Not documented.'}
+
+## Objective
+${soap.objective || 'Not documented.'}
+
+## Assessment
+${soap.assessment || 'Not documented.'}
+
+## Plan
+${soap.plan || 'Not documented.'}`;
+  };
+
+  // Edit a specific SOAP field (auto-syncs markdown)
   const editSoapField = useCallback((field: keyof SoapData, value: string) => {
     setSession(prev => {
       const baseNote = prev.edited ?? prev.generated;
       if (!baseNote) return prev;
       
+      const newSoap: SoapData = {
+        ...baseNote.soap,
+        [field]: value,
+      };
+      
       const newEdited: GeneratedNote = {
         ...baseNote,
-        soap: {
-          ...baseNote.soap,
-          [field]: value,
-        },
+        soap: newSoap,
+        markdown: buildMarkdownFromSoap(newSoap),
       };
       
       const newSession = { ...prev, edited: newEdited };
