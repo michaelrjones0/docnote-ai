@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio } from 'lucide-react';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
-import { usePhysicianPreferences, NoteEditorMode } from '@/hooks/usePhysicianPreferences';
+import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 
@@ -58,6 +58,12 @@ const AppHome = () => {
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const { preferences, setPreferences } = usePhysicianPreferences();
+  
+  // Keep a ref to preferences for use in callbacks (fixes stale closure)
+  const preferencesRef = useRef<PhysicianPreferences>(preferences);
+  useEffect(() => {
+    preferencesRef.current = preferences;
+  }, [preferences]);
 
   const {
     session: docSession,
@@ -270,7 +276,7 @@ const AppHome = () => {
     }
   };
 
-  const handleGenerateSoap = async () => {
+  const handleGenerateSoap = useCallback(async () => {
     const transcript = docSession.transcriptText;
     if (!transcript) {
       toast({
@@ -282,14 +288,16 @@ const AppHome = () => {
     }
 
     setIsGeneratingSoap(true);
-    const expectedMode = preferences.noteEditorMode;
+    // Always use the latest preferences from ref to avoid stale closure
+    const currentPrefs = preferencesRef.current;
+    const expectedMode = currentPrefs.noteEditorMode;
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-note', {
         body: { 
           noteType: 'SOAP',
           transcript,
-          preferences
+          preferences: currentPrefs
         }
       });
 
@@ -347,7 +355,7 @@ const AppHome = () => {
     } finally {
       setIsGeneratingSoap(false);
     }
-  };
+  }, [docSession.transcriptText, handleNewGenerated, toast]);
 
   const copyToClipboard = async (text: string, fieldName: string) => {
     try {
@@ -414,6 +422,17 @@ const AppHome = () => {
   const exportJson = getExportJson();
   const currentNoteType = getCurrentNoteType();
   const hasNote = currentSoap !== null || currentSoap3 !== null;
+  
+  // Check if the editor mode dropdown differs from the current note's type
+  const showModeSwitchBanner = hasNote && currentNoteType !== preferences.noteEditorMode;
+  const modeSwitchBannerRef = useRef<HTMLDivElement>(null);
+  
+  // Auto-scroll to mode switch banner when it appears
+  useEffect(() => {
+    if (showModeSwitchBanner && modeSwitchBannerRef.current) {
+      modeSwitchBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showModeSwitchBanner]);
 
   return (
     <DemoModeGuard>
@@ -932,6 +951,45 @@ const AppHome = () => {
             </div>
           </CardHeader>
           <CardContent>
+            {/* Mode Switch Banner - shown when dropdown mode differs from current note type */}
+            {showModeSwitchBanner && (
+              <div 
+                ref={modeSwitchBannerRef}
+                className="mb-4 p-4 rounded-lg border border-blue-500 bg-blue-50 dark:bg-blue-950/20"
+              >
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                    <span className="text-sm font-medium">
+                      Editor mode changed. Regenerate the note to apply the new format.
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => setPreferences({ noteEditorMode: currentNoteType as NoteEditorMode })}
+                    >
+                      Keep current note
+                    </Button>
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={handleGenerateSoap}
+                      disabled={isGeneratingSoap || !docSession.transcriptText}
+                    >
+                      {isGeneratingSoap ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Regenerate in {preferences.noteEditorMode === 'SOAP_3_FIELD' ? 'SOAP (3 fields)' : 'SOAP (4 fields)'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Conflict Banner - positioned directly above SOAP fields */}
             {showConflictBanner && (
               <div 
