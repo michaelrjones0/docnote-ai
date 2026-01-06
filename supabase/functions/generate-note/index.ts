@@ -6,6 +6,7 @@ const corsHeaders = {
 };
 
 interface Preferences {
+  noteStructure: 'SOAP' | 'Problem-Oriented';
   detailLevel: 'Brief' | 'Standard' | 'Detailed';
   planFormat: 'Bullets' | 'Paragraph';
   firstPerson: boolean;
@@ -17,6 +18,9 @@ interface Preferences {
 
 const validatePreferences = (prefs: any): Preferences => {
   return {
+    noteStructure: ['SOAP', 'Problem-Oriented'].includes(prefs?.noteStructure)
+      ? prefs.noteStructure
+      : 'SOAP',
     detailLevel: ['Brief', 'Standard', 'Detailed'].includes(prefs?.detailLevel) 
       ? prefs.detailLevel 
       : 'Standard',
@@ -87,6 +91,127 @@ ${prefs.styleText.trim()}`);
   return instructions.join('\n\n');
 };
 
+const buildStandardSoapSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+  return `You are an expert medical scribe assistant. Your task is to generate a SOAP note from clinical encounter transcripts.
+
+## PHYSICIAN PREFERENCES (apply these strictly):
+${preferenceInstructions}
+
+## CRITICAL INSTRUCTIONS:
+
+1. SUBJECTIVE:
+   - Summarize the patient's reported symptoms and history of present illness.
+   - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
+   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - Be concise and direct.
+
+2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
+   - Do NOT invent or hallucinate objective data.
+   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
+   - Do NOT write plausible-sounding exam findings that are not in the transcript.
+   - Only include objective data that is EXPLICITLY stated in the transcript.
+
+3. ASSESSMENT - CLINICAL PROBLEM STATEMENT:
+   - Write the assessment as a clinical problem statement or diagnosis, NOT meta-language.
+   - BAD: "I am assessing the patient for..." or "The assessment is that..."
+   - GOOD: "Difficulty solving Rubik's cube" or "Type 2 diabetes mellitus, uncontrolled" or "Acute upper respiratory infection"
+   - Be direct and clinical. State the problem or diagnosis.
+
+4. PLAN - ACTIONABLE AND CONCISE:
+   - Write the plan as concrete actions taken or to be taken, NOT intentions.
+   - BAD: "I plan to work with the patient..." or "We will continue to monitor..."
+   - GOOD: ${prefs.planFormat === 'Bullets' ? '"- Reviewed approach\\n- Practiced steps with patient\\n- Follow up in 2 weeks"' : '"Reviewed approach to solving Rubik\'s cube and practiced steps with patient. Follow up scheduled for 2 weeks."'}
+   ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
+   - Use active voice. State what was done or will be done.
+
+5. You must output ONLY valid JSON matching this exact structure:
+{
+  "soap": {
+    "subjective": "string - patient's reported symptoms/history, concise, no filler",
+    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
+    "assessment": "string - clinical problem statement/diagnosis, NOT meta-language",
+    "plan": "string - actionable steps taken/to be taken, NOT intentions"
+  },
+  "markdown": "formatted markdown note with ## headers for each SOAP section"
+}
+
+6. The markdown field should be a nicely formatted clinical note with:
+   ## Subjective
+   [content]
+   
+   ## Objective
+   [content]
+   
+   ## Assessment
+   [content]
+   
+   ## Plan
+   [content]`;
+};
+
+const buildProblemOrientedSystemPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
+  const detailSentences = prefs.detailLevel === 'Brief' ? '1-2' : prefs.detailLevel === 'Detailed' ? '4-6' : '3-4';
+  
+  return `You are an expert medical scribe assistant. Your task is to generate a PROBLEM-ORIENTED clinical note from encounter transcripts.
+
+## PHYSICIAN PREFERENCES (apply these strictly):
+${preferenceInstructions}
+
+## CRITICAL INSTRUCTIONS:
+
+1. TRANSCRIPT-ONLY CONSTRAINT:
+   - Only include information explicitly present in the transcript.
+   - Do NOT invent or extrapolate clinical information.
+
+2. SUBJECTIVE (Problem-Oriented Format):
+   - If multiple problems are evident in the transcript, organize by problem headings.
+   - If only one problem, use a single concise paragraph.
+   - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
+   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+
+3. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
+   - Do NOT invent or hallucinate objective data.
+   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
+   - If objective findings ARE present, organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.) using ONLY stated findings.
+   - Do NOT write plausible-sounding exam findings that are not in the transcript.
+
+4. ASSESSMENT AND PLAN (Problem-Oriented Format):
+   - Create a NUMBERED problem list.
+   - For each problem include:
+     - Problem name/diagnosis
+     - Assessment: ${prefs.firstPerson ? 'Use first-person voice' : 'Use neutral clinical voice'}. ${prefs.assessmentProblemList ? 'Keep concise, problem-focused.' : 'May be brief narrative.'}
+     - Differential: ONLY if differential was explicitly discussed in transcript; otherwise OMIT this line entirely.
+     - Plan: ${prefs.planFormat === 'Bullets' ? 'Format as bullet list with "- " prefix.' : 'Write as a flowing paragraph.'}
+   ${prefs.includeFollowUpLine ? '- If follow-up timing not stated, end the plan with "Follow up as needed."' : '- Only include follow-up if explicitly stated in transcript.'}
+
+5. You must output ONLY valid JSON matching this exact structure:
+{
+  "soap": {
+    "subjective": "string - full subjective content (problem-oriented format)",
+    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
+    "assessment": "string - combined assessment/problem list summaries",
+    "plan": "string - combined plan text (bullets or paragraph per preference)"
+  },
+  "markdown": "formatted problem-oriented markdown note"
+}
+
+6. The markdown field should be formatted as:
+   ## Subjective
+   [problem-oriented subjective content - use ### Problem Name headers if multiple problems]
+   
+   ## Objective
+   [system-based findings OR "Not documented."]
+   
+   ## Assessment and Plan
+   1. **Problem Name**
+      - Assessment: [assessment text]
+      - Differential: [only if discussed, otherwise omit]
+      - Plan: [plan items]
+   
+   2. **Next Problem**
+      [etc.]`;
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -134,65 +259,15 @@ ${chronicConditions.map((c: any) => `- ${c.condition_name}${c.icd_code ? ` (${c.
 
     const preferenceInstructions = buildPreferenceInstructions(preferences);
 
-    // For SOAP notes, use structured JSON output
+    // For SOAP note types (both SOAP and Problem-Oriented use structured JSON output)
     if (noteType === 'SOAP') {
-      const soapSystemPrompt = `You are an expert medical scribe assistant. Your task is to generate a SOAP note from clinical encounter transcripts.
+      const isProblemOriented = preferences.noteStructure === 'Problem-Oriented';
+      
+      const soapSystemPrompt = isProblemOriented
+        ? buildProblemOrientedSystemPrompt(preferences, preferenceInstructions)
+        : buildStandardSoapSystemPrompt(preferences, preferenceInstructions);
 
-## PHYSICIAN PREFERENCES (apply these strictly):
-${preferenceInstructions}
-
-## CRITICAL INSTRUCTIONS:
-
-1. SUBJECTIVE:
-   - Summarize the patient's reported symptoms and history of present illness.
-   - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${preferences.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct.
-
-2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
-   - Do NOT invent or hallucinate objective data.
-   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
-   - Do NOT write plausible-sounding exam findings that are not in the transcript.
-   - Only include objective data that is EXPLICITLY stated in the transcript.
-
-3. ASSESSMENT - CLINICAL PROBLEM STATEMENT:
-   - Write the assessment as a clinical problem statement or diagnosis, NOT meta-language.
-   - BAD: "I am assessing the patient for..." or "The assessment is that..."
-   - GOOD: "Difficulty solving Rubik's cube" or "Type 2 diabetes mellitus, uncontrolled" or "Acute upper respiratory infection"
-   - Be direct and clinical. State the problem or diagnosis.
-
-4. PLAN - ACTIONABLE AND CONCISE:
-   - Write the plan as concrete actions taken or to be taken, NOT intentions.
-   - BAD: "I plan to work with the patient..." or "We will continue to monitor..."
-   - GOOD: ${preferences.planFormat === 'Bullets' ? '"- Reviewed approach\\n- Practiced steps with patient\\n- Follow up in 2 weeks"' : '"Reviewed approach to solving Rubik\'s cube and practiced steps with patient. Follow up scheduled for 2 weeks."'}
-   ${preferences.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
-   - Use active voice. State what was done or will be done.
-
-5. You must output ONLY valid JSON matching this exact structure:
-{
-  "soap": {
-    "subjective": "string - patient's reported symptoms/history, concise, no filler",
-    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
-    "assessment": "string - clinical problem statement/diagnosis, NOT meta-language",
-    "plan": "string - actionable steps taken/to be taken, NOT intentions"
-  },
-  "markdown": "formatted markdown note with ## headers for each SOAP section"
-}
-
-6. The markdown field should be a nicely formatted clinical note with:
-   ## Subjective
-   [content]
-   
-   ## Objective
-   [content]
-   
-   ## Assessment
-   [content]
-   
-   ## Plan
-   [content]`;
-
-      const soapUserPrompt = `Generate a SOAP note from this clinical encounter.
+      const soapUserPrompt = `Generate a ${isProblemOriented ? 'Problem-Oriented' : 'SOAP'} note from this clinical encounter.
 
 ## Patient Context:
 ${patientContext || 'No additional context provided'}

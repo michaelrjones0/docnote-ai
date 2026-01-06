@@ -441,6 +441,23 @@ const AppHome = () => {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label htmlFor="noteStructure" className="text-sm">Note Structure</Label>
+                  <Select
+                    value={preferences.noteStructure}
+                    onValueChange={(value: 'SOAP' | 'Problem-Oriented') => 
+                      setPreferences({ noteStructure: value })
+                    }
+                  >
+                    <SelectTrigger id="noteStructure">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SOAP">SOAP</SelectItem>
+                      <SelectItem value="Problem-Oriented">Problem-Oriented</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="detailLevel" className="text-sm">Detail Level</Label>
                   <Select
                     value={preferences.detailLevel}
