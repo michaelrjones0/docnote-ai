@@ -532,9 +532,30 @@ const AppHome = () => {
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-foreground">Debug Info</span>
                   <span className="text-muted-foreground">
-                    Chunks sent: {liveScribe.debugInfo.chunksSent} | Transcript: {liveScribe.debugInfo.totalTranscriptLength} chars
+                    Chunks: {liveScribe.debugInfo.chunksSent} | Transcript: {liveScribe.debugInfo.totalTranscriptLength} chars
                   </span>
                 </div>
+                
+                {/* Audio Format Info */}
+                <div className="grid grid-cols-4 gap-2 text-muted-foreground bg-background/50 p-2 rounded">
+                  <div>
+                    <span className="text-foreground text-[10px] uppercase">Input Rate</span>
+                    <div className="text-foreground">{liveScribe.debugInfo.inputSampleRate ? `${liveScribe.debugInfo.inputSampleRate} Hz` : '—'}</div>
+                  </div>
+                  <div>
+                    <span className="text-foreground text-[10px] uppercase">Output Rate</span>
+                    <div className="text-foreground">{liveScribe.debugInfo.outputSampleRate} Hz</div>
+                  </div>
+                  <div>
+                    <span className="text-foreground text-[10px] uppercase">Encoding</span>
+                    <div className="text-foreground">{liveScribe.debugInfo.encoding}</div>
+                  </div>
+                  <div>
+                    <span className="text-foreground text-[10px] uppercase">Bytes/Chunk</span>
+                    <div className="text-foreground">{liveScribe.debugInfo.bytesPerChunk ? `${(liveScribe.debugInfo.bytesPerChunk / 1024).toFixed(1)} KB` : '—'}</div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 text-muted-foreground">
                   <div>
                     <span className="text-foreground">Live API:</span>{' '}
@@ -549,6 +570,11 @@ const AppHome = () => {
                     {liveScribe.debugInfo.lastLiveCallAt && (
                       <span className="ml-2 text-muted-foreground">
                         @ {new Date(liveScribe.debugInfo.lastLiveCallAt).toLocaleTimeString()}
+                      </span>
+                    )}
+                    {liveScribe.debugInfo.chunksWithNoTranscript > 0 && (
+                      <span className="ml-2 text-amber-500">
+                        ({liveScribe.debugInfo.chunksWithNoTranscript} empty)
                       </span>
                     )}
                   </div>
