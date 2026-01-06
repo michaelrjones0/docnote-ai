@@ -32,6 +32,7 @@ interface GeneratedNote4Field {
   noteType: 'SOAP_4_FIELD' | 'SOAP';
   soap: SoapData;
   markdown: string;
+  patientInstructions?: string;
 }
 
 interface GeneratedNote3Field {
@@ -39,6 +40,7 @@ interface GeneratedNote3Field {
   soap3: Soap3Data;
   ap: ApEntry[];
   markdown: string;
+  patientInstructions?: string;
 }
 
 type GeneratedNote = GeneratedNote4Field | GeneratedNote3Field;
@@ -407,6 +409,30 @@ ${soap3.assessmentPlan || 'Not documented.'}`;
     return null;
   }, [session.edited, session.generated]);
 
+  // Get patient instructions from the current note
+  const getPatientInstructions = useCallback((): string => {
+    const note = session.edited ?? session.generated;
+    if (!note) return '';
+    return note.patientInstructions || '';
+  }, [session.edited, session.generated]);
+
+  // Edit patient instructions
+  const editPatientInstructions = useCallback((value: string) => {
+    setSession(prev => {
+      const baseNote = prev.edited ?? prev.generated;
+      if (!baseNote) return prev;
+      
+      const newEdited = {
+        ...baseNote,
+        patientInstructions: value,
+      };
+      
+      const newSession = { ...prev, edited: newEdited };
+      persistSession(newSession);
+      return newSession;
+    });
+  }, [persistSession]);
+
   return {
     session,
     showConflictBanner,
@@ -435,6 +461,8 @@ ${soap3.assessmentPlan || 'Not documented.'}`;
     getCurrentMarkdown,
     getExportJson,
     getCurrentNoteType,
+    getPatientInstructions,
+    editPatientInstructions,
     // Type guards
     isNote4Field,
     isNote3Field,
