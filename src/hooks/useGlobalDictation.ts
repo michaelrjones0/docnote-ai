@@ -34,9 +34,17 @@ export type GlobalDictationStatus = 'idle' | 'listening' | 'transcribing';
 
 // Instant dictation tuning constants
 const TARGET_SAMPLE_RATE = 16000;     // Output sample rate for transcription
-const TARGET_DURATION_MS = 800;       // Target audio duration per batch
-const MIN_SAMPLES = TARGET_SAMPLE_RATE * 0.5; // Minimum samples (~500ms)
+const TARGET_DURATION_MS = 800;       // Target audio duration per batch (~800ms)
+const MIN_SAMPLES = TARGET_SAMPLE_RATE * 0.5; // Minimum samples (~500ms = 8000 samples)
 const DEDUP_TOLERANCE_MS = 80;        // Tolerance for segment deduplication
+
+// Queued batch type: WAV bytes ready to send
+interface QueuedBatch {
+  wavBase64: string;
+  durationMs: number;
+  sessionId: number;
+  peak: number;
+}
 
 interface UseGlobalDictationOptions {
   onError?: (error: string) => void;
@@ -92,6 +100,9 @@ export function useGlobalDictation({
   const pcmBufferRef = useRef<Float32Array[]>([]);
   const sourceSampleRateRef = useRef<number>(48000); // Will be set from AudioContext
   
+  // FIFO send queue - batches ready to send (WAV base64)
+  const sendQueueRef = useRef<QueuedBatch[]>([]);
+  
   // Processing state
   const isProcessingRef = useRef(false);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -136,6 +147,7 @@ export function useGlobalDictation({
     }
     
     pcmBufferRef.current = [];
+    sendQueueRef.current = [];
     lastCommittedEndMsRef.current = 0;
     recordingStartTimeRef.current = 0;
     lastBatchTimeRef.current = 0;
@@ -220,107 +232,127 @@ export function useGlobalDictation({
     return btoa(binary);
   }, []);
 
-  // Process current batch of PCM samples
-  const processBatch = useCallback(async (options?: { force?: boolean }) => {
+  // Move pending PCM chunks to send queue as a prepared batch
+  const enqueueBatch = useCallback((options?: { force?: boolean }) => {
     const force = options?.force ?? false;
     
-    if (isProcessingRef.current) return;
-    if (pcmBufferRef.current.length === 0) return;
+    if (pcmBufferRef.current.length === 0) return false;
     
-    // Capture session state at batch start
-    const currentSessionId = sessionIdRef.current;
-    const targetFieldId = activeFieldIdAtStartRef.current;
-    
-    const activeField = getActiveField();
-    if (!activeField && !force) {
-      pcmBufferRef.current = [];
-      safeLog('[GlobalDictation] No active field, clearing queue');
-      onNoFieldFocused?.();
-      return;
-    }
-
-    // Combine all buffered Float32 arrays
     const totalSamples = pcmBufferRef.current.reduce((sum, arr) => sum + arr.length, 0);
     const sourceSampleRate = sourceSampleRateRef.current;
     const expectedSamplesFor16k = (totalSamples / sourceSampleRate) * TARGET_SAMPLE_RATE;
     
-    // Check if we have enough audio (skip check if force flushing)
     const now = Date.now();
     const elapsedMs = lastBatchTimeRef.current > 0 
       ? now - lastBatchTimeRef.current 
       : now - recordingStartTimeRef.current;
     
+    // Check if we have enough audio (skip check if force)
     if (!force && expectedSamplesFor16k < MIN_SAMPLES && elapsedMs < TARGET_DURATION_MS) {
-      scheduleBatchCheck();
-      return;
+      return false;
     }
-
-    // CONSUME buffer - never resend
+    
+    // CONSUME buffer - move to queue
     const bufferedChunks = pcmBufferRef.current;
     pcmBufferRef.current = [];
     lastBatchTimeRef.current = now;
+    
+    // Combine all chunks into single Float32Array
+    const combinedSamples = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const chunk of bufferedChunks) {
+      combinedSamples.set(chunk, offset);
+      offset += chunk.length;
+    }
+    
+    // Check for silence
+    let peak = 0;
+    for (let i = 0; i < combinedSamples.length; i++) {
+      const v = Math.abs(combinedSamples[i]);
+      if (v > peak) peak = v;
+    }
+    
+    if (peak < 0.01) {
+      if (DEBUG_AUDIO) {
+        console.log('[GlobalDictation] near-silence, skipping enqueue', { peak: peak.toFixed(6), samples: totalSamples });
+      }
+      return false;
+    }
+    
+    // Resample to 16kHz mono
+    const resampled = resampleToMono16k(combinedSamples, sourceSampleRate);
+    
+    // Convert to PCM16
+    const pcm16 = floatToPCM16(resampled);
+    
+    // Create WAV file
+    const wavBytes = createWavFile(pcm16);
+    const wavBase64 = uint8ArrayToBase64(wavBytes);
+    
+    const durationMs = (resampled.length / TARGET_SAMPLE_RATE) * 1000;
+    
+    // Add to FIFO queue
+    const batch: QueuedBatch = {
+      wavBase64,
+      durationMs,
+      sessionId: sessionIdRef.current,
+      peak,
+    };
+    sendQueueRef.current.push(batch);
+    
+    if (DEBUG_AUDIO) {
+      console.log('[GlobalDictation] enqueueBatch', {
+        pendingChunksCount: pcmBufferRef.current.length,
+        sendQueueLen: sendQueueRef.current.length,
+        isProcessing: isProcessingRef.current,
+        isStopping: isStoppingRef.current,
+        durationMs: durationMs.toFixed(0),
+        wavBytes: wavBytes.length,
+      });
+    }
+    
+    return true;
+  }, [resampleToMono16k, floatToPCM16, createWavFile, uint8ArrayToBase64]);
+
+  // Process one batch from send queue - FIFO
+  const processQueue = useCallback(async (): Promise<void> => {
+    // Already processing - queue will continue after current completes
+    if (isProcessingRef.current) return;
+    
+    // Nothing to send
+    if (sendQueueRef.current.length === 0) return;
+    
+    const activeField = getActiveField();
+    if (!activeField && !isStoppingRef.current) {
+      // No active field and not stopping - clear queue
+      sendQueueRef.current = [];
+      safeLog('[GlobalDictation] No active field, clearing send queue');
+      onNoFieldFocused?.();
+      return;
+    }
+    
+    // DEQUEUE first batch (FIFO)
+    const batch = sendQueueRef.current.shift()!;
     isProcessingRef.current = true;
     setStatus('transcribing');
-
+    
+    if (DEBUG_AUDIO) {
+      console.log('[GlobalDictation] processQueue sending', {
+        sendQueueLen: sendQueueRef.current.length,
+        pendingChunksCount: pcmBufferRef.current.length,
+        isProcessing: true,
+        isStopping: isStoppingRef.current,
+        durationMs: batch.durationMs.toFixed(0),
+        sessionId: batch.sessionId,
+      });
+    }
+    
     try {
-      // Combine all chunks into single Float32Array
-      const combinedSamples = new Float32Array(totalSamples);
-      let offset = 0;
-      for (const chunk of bufferedChunks) {
-        combinedSamples.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      // Check for silence
-      let peak = 0;
-      for (let i = 0; i < combinedSamples.length; i++) {
-        const v = Math.abs(combinedSamples[i]);
-        if (v > peak) peak = v;
-      }
-
-      if (peak < 0.01) {
-        if (DEBUG_AUDIO) {
-          console.log('[GlobalDictation] near-silence, skipping', { peak: peak.toFixed(6), samples: totalSamples });
-        }
-        isProcessingRef.current = false;
-        if (isActiveRef.current) {
-          setStatus('listening');
-          if (pcmBufferRef.current.length > 0) scheduleBatchCheck();
-        }
-        return;
-      }
-
-      // Resample to 16kHz mono
-      const resampled = resampleToMono16k(combinedSamples, sourceSampleRate);
-      
-      // Convert to PCM16
-      const pcm16 = floatToPCM16(resampled);
-      
-      // Create WAV file
-      const wavBytes = createWavFile(pcm16);
-      const wavBase64 = uint8ArrayToBase64(wavBytes);
-      
-      const durationMs = (resampled.length / TARGET_SAMPLE_RATE) * 1000;
-      
-      if (DEBUG_AUDIO) {
-        console.log('[GlobalDictation] batchSend', {
-          sourceSamples: totalSamples,
-          sourceSampleRate,
-          resampledSamples: resampled.length,
-          wavBytes: wavBytes.length,
-          durationMs: durationMs.toFixed(0),
-          peak: peak.toFixed(4),
-          lastCommittedEndMs: lastCommittedEndMsRef.current,
-          force,
-          sessionId: currentSessionId,
-        });
-      }
-
       const startTime = Date.now();
-
+      
       const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-live', {
         body: {
-          audio: wavBase64,
+          audio: batch.wavBase64,
           chunkIndex: 0,
           mimeType: 'audio/wav',
           sampleRate: TARGET_SAMPLE_RATE,
@@ -328,7 +360,7 @@ export function useGlobalDictation({
           debug: DEBUG_AUDIO,
         },
       });
-
+      
       if (DEBUG_AUDIO) {
         console.log('[GlobalDictation] response meta', { 
           textLen: data?.meta?.textLen ?? (data?.text?.trim()?.length ?? 0), 
@@ -336,43 +368,45 @@ export function useGlobalDictation({
           latencyMs: Date.now() - startTime,
         });
       }
-
+      
       if (fnError) throw fnError;
-
+      
       // Session validation: only insert if session matches
-      if (currentSessionId !== sessionIdRef.current) {
+      if (batch.sessionId !== sessionIdRef.current) {
         if (DEBUG_AUDIO) {
           console.log('[GlobalDictation] session mismatch, discarding result', {
-            batchSession: currentSessionId,
+            batchSession: batch.sessionId,
             currentSession: sessionIdRef.current,
           });
         }
         return;
       }
-
+      
       // Dedupe insertion using segment timestamps
       const segments = Array.isArray(data?.segments) ? data.segments : [];
       const lastEnd = lastCommittedEndMsRef.current;
-
+      
       const newSegments = segments
         .filter((s: { endMs?: number }) => typeof s?.endMs === 'number' && s.endMs > lastEnd + DEDUP_TOLERANCE_MS)
         .sort((a: { startMs?: number }, b: { startMs?: number }) => (a.startMs ?? 0) - (b.startMs ?? 0));
-
+      
       const deltaText = newSegments.map((s: { content?: string }) => s.content || '').join(' ').trim();
       const newMaxEndMs = newSegments.length > 0 
         ? Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0))
         : lastEnd;
-
+      
       if (DEBUG_AUDIO) {
         console.log('[GlobalDictation] batchRespMeta', {
           segmentsLen: segments.length,
           newSegmentsLen: newSegments.length,
           lastCommittedEndMs: newMaxEndMs,
           isStopping: isStoppingRef.current,
+          sendQueueLen: sendQueueRef.current.length,
+          pendingChunksCount: pcmBufferRef.current.length,
         });
       }
-
-      // Allow inserting even after Stop was pressed (until flush is complete)
+      
+      // Allow inserting even after Stop was pressed (until drain is complete)
       if (deltaText) {
         const inserted = insertText(deltaText + ' ');
         if (inserted) {
@@ -388,14 +422,16 @@ export function useGlobalDictation({
       onError?.(errorMessage);
     } finally {
       isProcessingRef.current = false;
-      if (isActiveRef.current && !isStoppingRef.current) {
+      
+      // Immediately process next in queue (drain completely)
+      if (sendQueueRef.current.length > 0) {
+        // Use setImmediate-like pattern to allow state updates
+        setTimeout(() => processQueue(), 0);
+      } else if (isActiveRef.current && !isStoppingRef.current) {
         setStatus('listening');
-        if (pcmBufferRef.current.length > 0) {
-          scheduleBatchCheck();
-        }
       }
     }
-  }, [getActiveField, insertText, onError, onNoFieldFocused, resampleToMono16k, floatToPCM16, createWavFile, uint8ArrayToBase64]);
+  }, [getActiveField, insertText, onError, onNoFieldFocused]);
 
   // Schedule next batch check
   const scheduleBatchCheck = useCallback(() => {
@@ -403,11 +439,13 @@ export function useGlobalDictation({
     
     batchTimerRef.current = setTimeout(() => {
       batchTimerRef.current = null;
-      if (pcmBufferRef.current.length > 0 && !isProcessingRef.current && isActiveRef.current) {
-        processBatch();
+      if (isActiveRef.current && !isProcessingRef.current) {
+        if (enqueueBatch()) {
+          processQueue();
+        }
       }
     }, TARGET_DURATION_MS);
-  }, [processBatch]);
+  }, [enqueueBatch, processQueue]);
 
   // Start recording with AudioWorklet
   const startRecording = useCallback(async () => {
@@ -470,13 +508,15 @@ export function useGlobalDictation({
         if (pcmData) {
           pcmBufferRef.current.push(new Float32Array(pcmData));
           
-          // Check if we should send a batch
+          // Check if we should enqueue a batch
           const totalSamples = pcmBufferRef.current.reduce((sum, arr) => sum + arr.length, 0);
           const expectedSamplesFor16k = (totalSamples / sourceSampleRateRef.current) * TARGET_SAMPLE_RATE;
           const elapsedMs = Date.now() - (lastBatchTimeRef.current || recordingStartTimeRef.current);
           
           if (expectedSamplesFor16k >= MIN_SAMPLES || elapsedMs >= TARGET_DURATION_MS) {
-            processBatch();
+            if (enqueueBatch()) {
+              processQueue();
+            }
           } else if (!batchTimerRef.current) {
             scheduleBatchCheck();
           }
@@ -505,9 +545,9 @@ export function useGlobalDictation({
       onError?.(errorMessage);
       cleanup();
     }
-  }, [status, cleanup, setIsDictating, onError, processBatch, scheduleBatchCheck, activeFieldId]);
+  }, [status, cleanup, setIsDictating, onError, enqueueBatch, processQueue, scheduleBatchCheck, activeFieldId]);
 
-  // Stop recording with proper flush
+  // Stop recording with proper drain of send queue
   const stopRecording = useCallback(async () => {
     if (!isActiveRef.current && status === 'idle') return;
     
@@ -539,43 +579,66 @@ export function useGlobalDictation({
     }
 
     if (DEBUG_AUDIO) {
-      console.log('[GlobalDictation] stopRecording: flushing', {
+      console.log('[GlobalDictation] stopRecording: starting drain', {
         sessionId: sessionIdRef.current,
-        bufferChunks: pcmBufferRef.current.length,
+        pendingChunksCount: pcmBufferRef.current.length,
+        sendQueueLen: sendQueueRef.current.length,
         isProcessing: isProcessingRef.current,
       });
     }
 
-    // FORCE flush loop: keep flushing until buffer is empty AND no in-flight request
-    let flushAttempts = 0;
-    const maxFlushAttempts = 20; // Safety limit (20 * 100ms = 2s max)
+    // Force enqueue any remaining pending chunks
+    enqueueBatch({ force: true });
+
+    // DRAIN LOOP: keep draining until queue is empty AND no in-flight request AND no pending chunks
+    let drainAttempts = 0;
+    const maxDrainAttempts = 40; // Safety limit (40 * 50ms = 2s max)
     
-    while (flushAttempts < maxFlushAttempts) {
-      // Wait for any in-flight request to complete
-      while (isProcessingRef.current) {
-        await new Promise(resolve => setTimeout(resolve, 50));
+    while (drainAttempts < maxDrainAttempts) {
+      const hasWork = isProcessingRef.current || 
+                      sendQueueRef.current.length > 0 || 
+                      pcmBufferRef.current.length > 0;
+      
+      if (!hasWork) {
+        break; // All drained!
       }
       
-      // Check if there's remaining audio to flush
-      if (pcmBufferRef.current.length === 0) {
-        break; // All flushed!
-      }
-      
-      // Force flush remaining audio (even if < MIN_BYTES)
-      if (DEBUG_AUDIO) {
-        console.log('[GlobalDictation] flush attempt', {
-          attempt: flushAttempts + 1,
-          bufferChunks: pcmBufferRef.current.length,
+      if (DEBUG_AUDIO && drainAttempts % 4 === 0) {
+        console.log('[GlobalDictation] drain check', {
+          attempt: drainAttempts + 1,
+          pendingChunksCount: pcmBufferRef.current.length,
+          sendQueueLen: sendQueueRef.current.length,
+          isProcessing: isProcessingRef.current,
         });
       }
       
-      await processBatch({ force: true });
-      flushAttempts++;
+      // If we have pending chunks, enqueue them
+      if (pcmBufferRef.current.length > 0) {
+        enqueueBatch({ force: true });
+      }
+      
+      // If not processing and queue has items, process next
+      if (!isProcessingRef.current && sendQueueRef.current.length > 0) {
+        await processQueue();
+      } else {
+        // Wait for in-flight request to complete
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      drainAttempts++;
     }
 
-    // Final wait for last in-flight request
+    // Final safety wait for any last in-flight request
     while (isProcessingRef.current) {
       await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    if (DEBUG_AUDIO) {
+      console.log('[GlobalDictation] drain complete', {
+        drainAttempts,
+        pendingChunksCount: pcmBufferRef.current.length,
+        sendQueueLen: sendQueueRef.current.length,
+      });
     }
 
     // Now safe to fully cleanup
@@ -585,6 +648,7 @@ export function useGlobalDictation({
     }
     
     pcmBufferRef.current = [];
+    sendQueueRef.current = [];
     lastCommittedEndMsRef.current = 0;
     recordingStartTimeRef.current = 0;
     lastBatchTimeRef.current = 0;
@@ -593,8 +657,8 @@ export function useGlobalDictation({
     setIsDictating(false);
     
     setStatus('idle');
-    safeLog('[GlobalDictation] Recording stopped, flush complete');
-  }, [status, processBatch, setIsDictating]);
+    safeLog('[GlobalDictation] Recording stopped, drain complete');
+  }, [status, enqueueBatch, processQueue, setIsDictating]);
 
   // Toggle function
   const toggle = useCallback(async () => {
