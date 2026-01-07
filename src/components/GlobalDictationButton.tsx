@@ -23,7 +23,6 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
     toggle, 
     activeFieldId 
   } = useGlobalDictation({
-    chunkIntervalMs: 3000,
     onError: (error) => {
       toast({
         title: 'Dictation Error',

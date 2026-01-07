@@ -32,17 +32,18 @@ const DEBUG_AUDIO = true;
 
 export type GlobalDictationStatus = 'idle' | 'listening' | 'transcribing';
 
-// Minimum audio buffer size to attempt transcription (12 KB)
-const MIN_BYTES = 12_000;
+// Instant dictation tuning constants
+const MIN_BYTES = 8_000;        // Minimum buffer size to send (8 KB)
+const TARGET_MS = 800;          // Target audio duration per batch (ms)
+const TIMESLICE_MS = 250;       // MediaRecorder timeslice for frequent chunks
+const DEDUP_TOLERANCE_MS = 80;  // Tolerance for segment deduplication
 
 interface UseGlobalDictationOptions {
-  chunkIntervalMs?: number;
   onError?: (error: string) => void;
   onNoFieldFocused?: () => void;
 }
 
 export function useGlobalDictation({
-  chunkIntervalMs = 1200,
   onError,
   onNoFieldFocused,
 }: UseGlobalDictationOptions = {}) {
@@ -55,17 +56,20 @@ export function useGlobalDictation({
   const streamRef = useRef<MediaStream | null>(null);
   const pendingBlobsRef = useRef<Blob[]>([]);
   const isProcessingRef = useRef(false);
-  const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // WebM init segment (first chunk with headers) - needed for subsequent chunk decoding
   const webmInitBlobRef = useRef<Blob | null>(null);
-  // Track last inserted segment endMs to dedupe overlapping transcripts
-  const lastInsertedEndMsRef = useRef<number>(0);
+  // Track last committed segment endMs to dedupe overlapping transcripts
+  const lastCommittedEndMsRef = useRef<number>(0);
+  // Track recording start time for estimating audio duration
+  const recordingStartTimeRef = useRef<number>(0);
+  const lastBatchTimeRef = useRef<number>(0);
 
   // Cleanup function
   const cleanup = useCallback(() => {
-    if (chunkIntervalRef.current) {
-      clearInterval(chunkIntervalRef.current);
-      chunkIntervalRef.current = null;
+    if (batchTimerRef.current) {
+      clearTimeout(batchTimerRef.current);
+      batchTimerRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -74,14 +78,35 @@ export function useGlobalDictation({
     mediaRecorderRef.current = null;
     pendingBlobsRef.current = [];
     webmInitBlobRef.current = null;
-    lastInsertedEndMsRef.current = 0;
+    lastCommittedEndMsRef.current = 0;
+    recordingStartTimeRef.current = 0;
+    lastBatchTimeRef.current = 0;
     isProcessingRef.current = false;
     setIsDictating(false);
   }, [setIsDictating]);
 
-  // Process next blob from queue sequentially
-  const processNextBlob = useCallback(async () => {
-    if (isProcessingRef.current || pendingBlobsRef.current.length === 0) return;
+  // Schedule next batch check
+  const scheduleBatchCheck = useCallback(() => {
+    if (batchTimerRef.current) return; // Already scheduled
+    
+    batchTimerRef.current = setTimeout(() => {
+      batchTimerRef.current = null;
+      // Trigger processing if we have enough audio
+      if (pendingBlobsRef.current.length > 0 && !isProcessingRef.current) {
+        processBatch();
+      }
+    }, TARGET_MS);
+  }, []);
+
+  // Process current batch of audio chunks
+  const processBatch = useCallback(async () => {
+    // Single in-flight request enforcement
+    if (isProcessingRef.current) {
+      // Just buffer, don't start another request
+      return;
+    }
+    
+    if (pendingBlobsRef.current.length === 0) return;
     
     const activeField = getActiveField();
     if (!activeField) {
@@ -94,30 +119,34 @@ export function useGlobalDictation({
 
     // Build a blob with init segment prepended (needed for webm decoding)
     const init = webmInitBlobRef.current;
-    const parts = init ? [init, ...pendingBlobsRef.current] : [...pendingBlobsRef.current];
-    const blobMimeType = init?.type || pendingBlobsRef.current[0]?.type || 'audio/webm;codecs=opus';
+    const chunksToProcess = [...pendingBlobsRef.current];
+    const parts = init ? [init, ...chunksToProcess] : [...chunksToProcess];
+    const blobMimeType = init?.type || chunksToProcess[0]?.type || 'audio/webm;codecs=opus';
     const blob = new Blob(parts, { type: blobMimeType });
     
-    if (DEBUG_AUDIO) {
-      console.log('[DictationAudioDebug] initSegment', {
-        hasInit: !!init,
-        initSize: init?.size,
-        batchChunks: pendingBlobsRef.current.length,
-        combinedBlobSize: blob.size,
-      });
-    }
+    // Calculate approximate audio duration based on time elapsed
+    const now = Date.now();
+    const approxDurationMs = lastBatchTimeRef.current > 0 
+      ? now - lastBatchTimeRef.current 
+      : now - recordingStartTimeRef.current;
     
-    // If combined blob is too small, wait for more chunks
-    if (blob.size < MIN_BYTES) {
-      safeLog('[GlobalDictation] Audio blob too small, waiting for more', { 
-        audioBytes: blob.size, 
-        minBytes: MIN_BYTES 
-      });
+    // PHI-safe batch send log
+    console.log('[GlobalDictation] batchSend', {
+      chunkCount: chunksToProcess.length,
+      batchBytes: blob.size,
+      approxDurationMs,
+      lastCommittedEndMs: lastCommittedEndMsRef.current,
+    });
+    
+    // If combined blob is too small and we haven't waited long enough, defer
+    if (blob.size < MIN_BYTES && approxDurationMs < TARGET_MS) {
+      scheduleBatchCheck();
       return;
     }
 
-    // Clear pending chunks (but keep init for next batch)
+    // CONSUME blobs from queue - never resend overlapping audio
     pendingBlobsRef.current = [];
+    lastBatchTimeRef.current = now;
     isProcessingRef.current = true;
     setStatus('transcribing');
 
@@ -154,7 +183,7 @@ export function useGlobalDictation({
           setStatus('listening');
         }
         if (pendingBlobsRef.current.length > 0) {
-          processNextBlob();
+          scheduleBatchCheck();
         }
         return;
       }
@@ -190,7 +219,7 @@ export function useGlobalDictation({
           setStatus('listening');
         }
         if (pendingBlobsRef.current.length > 0) {
-          processNextBlob();
+          scheduleBatchCheck();
         }
         return;
       }
@@ -235,29 +264,29 @@ export function useGlobalDictation({
 
       // Dedupe insertion using segment timestamps to avoid repeating overlapping content
       const segments = Array.isArray(data?.segments) ? data.segments : [];
-      const lastEnd = lastInsertedEndMsRef.current;
+      const lastEnd = lastCommittedEndMsRef.current;
 
-      // Filter to only new segments beyond what we've already inserted (50ms tolerance)
+      // Filter to only new segments beyond what we've already committed (with tolerance)
       const newSegments = segments
-        .filter((s: { endMs?: number }) => typeof s?.endMs === 'number' && s.endMs > lastEnd + 50)
+        .filter((s: { endMs?: number }) => typeof s?.endMs === 'number' && s.endMs > lastEnd + DEDUP_TOLERANCE_MS)
         .sort((a: { startMs?: number }, b: { startMs?: number }) => (a.startMs ?? 0) - (b.startMs ?? 0));
 
-      const toInsert = newSegments.map((s: { content?: string }) => s.content || '').join(' ').trim();
+      const deltaText = newSegments.map((s: { content?: string }) => s.content || '').join(' ').trim();
+      const newMaxEndMs = newSegments.length > 0 
+        ? Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0))
+        : lastEnd;
 
-      // PHI-safe debug log (only lengths and timing, never content)
-      console.log('[GlobalDictation] insertDedup', {
-        lastEndBefore: lastEnd,
-        segmentsIn: segments.length,
-        segmentsInserted: newSegments.length,
-        lastEndAfter: newSegments.length > 0 
-          ? Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0))
-          : lastEnd,
+      // PHI-safe response metadata log
+      console.log('[GlobalDictation] batchRespMeta', {
+        segmentsLen: segments.length,
+        newSegmentsLen: newSegments.length,
+        lastCommittedEndMs: newMaxEndMs,
       });
 
-      if (toInsert) {
-        const inserted = insertText(toInsert + ' ');
+      if (deltaText) {
+        const inserted = insertText(deltaText + ' ');
         if (inserted) {
-          lastInsertedEndMsRef.current = Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0));
+          lastCommittedEndMsRef.current = newMaxEndMs;
         } else {
           safeLog('[GlobalDictation] Failed to insert text - no active field');
         }
@@ -272,13 +301,13 @@ export function useGlobalDictation({
       // Only set back to listening if still recording
       if (mediaRecorderRef.current?.state === 'recording') {
         setStatus('listening');
-      }
-      // Process next blob in queue
-      if (pendingBlobsRef.current.length > 0) {
-        processNextBlob();
+        // If more chunks accumulated while processing, schedule next batch
+        if (pendingBlobsRef.current.length > 0) {
+          scheduleBatchCheck();
+        }
       }
     }
-  }, [getActiveField, insertText, onError, onNoFieldFocused]);
+  }, [getActiveField, insertText, onError, onNoFieldFocused, scheduleBatchCheck]);
 
   // Start recording
   const startRecording = useCallback(async () => {
@@ -288,7 +317,9 @@ export function useGlobalDictation({
       // Reset for new recording session
       pendingBlobsRef.current = [];
       webmInitBlobRef.current = null;
-      lastInsertedEndMsRef.current = 0;
+      lastCommittedEndMsRef.current = 0;
+      recordingStartTimeRef.current = Date.now();
+      lastBatchTimeRef.current = 0;
       setError(null);
       
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -322,7 +353,16 @@ export function useGlobalDictation({
             }
           }
           pendingBlobsRef.current.push(event.data);
-          processNextBlob();
+          
+          // Check if we should send a batch (have enough data or time elapsed)
+          const batchBytes = pendingBlobsRef.current.reduce((sum, b) => sum + b.size, 0);
+          const elapsedMs = Date.now() - (lastBatchTimeRef.current || recordingStartTimeRef.current);
+          
+          if (batchBytes >= MIN_BYTES || elapsedMs >= TARGET_MS) {
+            processBatch();
+          } else {
+            scheduleBatchCheck();
+          }
         }
       };
 
@@ -332,19 +372,12 @@ export function useGlobalDictation({
       };
 
       mediaRecorderRef.current = recorder;
-      // Start with NO timeslice - we'll use requestData() on interval
-      recorder.start();
-
-      // Set up interval to request data chunks
-      chunkIntervalRef.current = setInterval(() => {
-        if (recorder.state === 'recording') {
-          recorder.requestData();
-        }
-      }, chunkIntervalMs);
+      // Start WITH timeslice for frequent small chunks (instant feel)
+      recorder.start(TIMESLICE_MS);
 
       setStatus('listening');
       setIsDictating(true);
-      safeLog('[GlobalDictation] Recording started');
+      safeLog('[GlobalDictation] Recording started with instant dictation mode');
     } catch (err) {
       safeErrorLog('[GlobalDictation] Microphone access error:', err);
       const errorMessage = err instanceof Error 
@@ -354,7 +387,7 @@ export function useGlobalDictation({
       onError?.(errorMessage);
       cleanup();
     }
-  }, [status, chunkIntervalMs, processNextBlob, cleanup, setIsDictating, onError]);
+  }, [status, processBatch, scheduleBatchCheck, cleanup, setIsDictating, onError]);
 
   // Stop recording
   const stopRecording = useCallback(async () => {
@@ -365,10 +398,10 @@ export function useGlobalDictation({
       return;
     }
 
-    // Clear the interval first
-    if (chunkIntervalRef.current) {
-      clearInterval(chunkIntervalRef.current);
-      chunkIntervalRef.current = null;
+    // Clear the batch timer
+    if (batchTimerRef.current) {
+      clearTimeout(batchTimerRef.current);
+      batchTimerRef.current = null;
     }
 
     // Request final data before stopping
@@ -384,7 +417,7 @@ export function useGlobalDictation({
       while (isProcessingRef.current || pendingBlobsRef.current.length > 0) {
         await new Promise(resolve => setTimeout(resolve, 50));
         if (!isProcessingRef.current && pendingBlobsRef.current.length > 0) {
-          await processNextBlob();
+          await processBatch();
         }
       }
     } else {
@@ -393,7 +426,7 @@ export function useGlobalDictation({
     }
 
     safeLog('[GlobalDictation] Recording stopped');
-  }, [cleanup, processNextBlob]);
+  }, [cleanup, processBatch]);
 
   // Toggle function - always allow stopping if recording
   const toggle = useCallback(async () => {
@@ -414,8 +447,8 @@ export function useGlobalDictation({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (chunkIntervalRef.current) {
-        clearInterval(chunkIntervalRef.current);
+      if (batchTimerRef.current) {
+        clearTimeout(batchTimerRef.current);
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
