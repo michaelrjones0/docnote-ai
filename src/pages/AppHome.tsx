@@ -75,6 +75,7 @@ const AppHome = () => {
   const [isStartingBatch, setIsStartingBatch] = useState(false);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [dictationScratchpad, setDictationScratchpad] = useState('');
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [pendingSignatureName, setPendingSignatureName] = useState('');
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
@@ -659,6 +660,19 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                   </div>
                 </div>
               </CardHeader>
+            </Card>
+
+            {/* Dictation Scratchpad - for smoke testing global dictation */}
+            <Card>
+              <CardContent className="pt-4">
+                <DictationTextarea
+                  fieldId="dictation_scratchpad"
+                  label="Dictation Scratchpad"
+                  value={dictationScratchpad}
+                  onChange={(e) => setDictationScratchpad(e.target.value)}
+                  placeholder="Click here and use the global mic to test dictation..."
+                />
+              </CardContent>
             </Card>
 
         {/* Conflict Banner - now rendered inside SOAP Note section */}
