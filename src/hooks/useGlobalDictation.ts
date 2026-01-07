@@ -253,14 +253,20 @@ export function useGlobalDictation({
     safeLog('[GlobalDictation] Recording stopped');
   }, [cleanup, processChunks]);
 
-  // Toggle function
+  // Toggle function - always allow stopping if recording
   const toggle = useCallback(async () => {
-    if (status === 'listening') {
+    const recorder = mediaRecorderRef.current;
+    const isRecording = recorder?.state === 'recording';
+
+    if (isRecording) {
       await stopRecording();
-    } else if (status === 'idle') {
+      return;
+    }
+
+    // Only start if truly idle
+    if (status === 'idle') {
       await startRecording();
     }
-    // Ignore toggle during transcribing
   }, [status, startRecording, stopRecording]);
 
   // Cleanup on unmount
