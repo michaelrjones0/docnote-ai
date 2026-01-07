@@ -92,6 +92,8 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
         variant={isListening ? 'destructive' : 'default'}
         size="sm"
         onClick={toggle}
+        onMouseDown={(e) => e.preventDefault()}
+        onPointerDown={(e) => e.preventDefault()}
         disabled={isTranscribing}
         className={cn(
           'transition-all',
