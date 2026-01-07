@@ -495,12 +495,54 @@ serve(async (req) => {
       );
     }
 
-    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex } = requestBody;
+    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex, mimeType: inputMimeType } = requestBody;
     
-    if (!audio) {
+    // Normalize base64 input: could be raw base64 or data URL
+    const rawAudio = typeof audio === 'string' ? audio : '';
+    const b64Audio = rawAudio.includes(',') ? rawAudio.split(',').pop()! : rawAudio;
+    
+    if (!b64Audio) {
       return new Response(
-        JSON.stringify({ error: 'No audio data provided', code: 'MISSING_AUDIO' }),
+        JSON.stringify({ error: 'No audio data provided', code: 'MISSING_AUDIO', meta: { receivedBytes: 0, mimeType: inputMimeType, chunkIndex } }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Decode base64 -> Uint8Array correctly
+    let pcmData: Uint8Array;
+    try {
+      const bin = atob(b64Audio);
+      pcmData = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        pcmData[i] = bin.charCodeAt(i);
+      }
+    } catch (decodeErr) {
+      console.error('[transcribe-audio-live] Base64 decode failed');
+      return new Response(
+        JSON.stringify({ error: 'Invalid base64 audio data', code: 'DECODE_ERROR', meta: { receivedBytes: 0, mimeType: inputMimeType, chunkIndex } }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const receivedBytes = pcmData.byteLength;
+    // Strip codecs from mimeType for content-type header
+    const mimeType = (inputMimeType || 'audio/webm').split(';')[0];
+    
+    // PHI-safe logging: only byte counts
+    console.log('[transcribe-audio-live] received', { receivedBytes, mimeType, chunkIndex });
+
+    // If payload is too small, skip processing
+    if (receivedBytes < 1000) {
+      console.log('[transcribe-audio-live] skipping tiny payload', { receivedBytes, mimeType, chunkIndex });
+      return new Response(
+        JSON.stringify({ 
+          text: '', 
+          segments: [], 
+          chunkIndex,
+          isPartial: false,
+          meta: { receivedBytes, mimeType, chunkIndex, skipped: 'too_small' } 
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -511,21 +553,12 @@ serve(async (req) => {
     } catch (configError) {
       console.error('[transcribe-audio-live] AWS config error');
       return new Response(
-        JSON.stringify({ error: 'Server configuration error', code: 'CONFIG_ERROR' }),
+        JSON.stringify({ error: 'Server configuration error', code: 'CONFIG_ERROR', meta: { receivedBytes, mimeType, chunkIndex } }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // SECURITY: Do not log userId or audio data sizes
-
-    // Decode base64 audio
-    const binaryString = atob(audio);
-    const pcmData = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      pcmData[i] = binaryString.charCodeAt(i);
-    }
-
-    // Create WAV file from PCM data
+    // Create WAV file from PCM data (binary bytes, not base64)
     const wavHeader = createWavHeader(pcmData.length, sampleRate, 1, 16);
     const wavData = new Uint8Array(wavHeader.length + pcmData.length);
     wavData.set(wavHeader, 0);
@@ -536,24 +569,50 @@ serve(async (req) => {
     const jobName = `medical-live-${timestamp}-${chunkId}`;
     const s3Key = `${awsConfig.s3Prefix}live/${jobName}.wav`;
 
-    // SECURITY: Do not log S3 keys or job names
-    await uploadToS3(
-      wavData, awsConfig.s3Bucket, s3Key, 'audio/wav',
-      awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
-    );
+    // Upload binary bytes to S3
+    try {
+      await uploadToS3(
+        wavData, awsConfig.s3Bucket, s3Key, 'audio/wav',
+        awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
+      );
+    } catch (uploadError) {
+      console.error('[transcribe-audio-live] S3 upload failed');
+      return new Response(
+        JSON.stringify({ 
+          text: '', 
+          segments: [], 
+          chunkIndex,
+          meta: { receivedBytes, mimeType, chunkIndex, providerError: String(uploadError) } 
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    await startMedicalTranscriptionJob(
-      jobName, 
-      `s3://${awsConfig.s3Bucket}/${s3Key}`, 
-      awsConfig.s3Bucket, 
-      awsConfig.s3Prefix, 
-      'wav',
-      sampleRate,
-      awsConfig.accessKeyId, 
-      awsConfig.secretAccessKey, 
-      awsConfig.region, 
-      languageCode
-    );
+    try {
+      await startMedicalTranscriptionJob(
+        jobName, 
+        `s3://${awsConfig.s3Bucket}/${s3Key}`, 
+        awsConfig.s3Bucket, 
+        awsConfig.s3Prefix, 
+        'wav',
+        sampleRate,
+        awsConfig.accessKeyId, 
+        awsConfig.secretAccessKey, 
+        awsConfig.region, 
+        languageCode
+      );
+    } catch (startJobError) {
+      console.error('[transcribe-audio-live] Transcription job start failed');
+      return new Response(
+        JSON.stringify({ 
+          text: '', 
+          segments: [], 
+          chunkIndex,
+          meta: { receivedBytes, mimeType, chunkIndex, providerError: String(startJobError) } 
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     const maxAttempts = 60;
     let transcriptText = '';
@@ -562,14 +621,17 @@ serve(async (req) => {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      const jobStatus = await getMedicalTranscriptionJobStatus(
-        jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
-      );
-      
-      // SECURITY: Do not log job status or attempt counts
+      let jobStatus;
+      try {
+        jobStatus = await getMedicalTranscriptionJobStatus(
+          jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region
+        );
+      } catch (statusError) {
+        console.error('[transcribe-audio-live] Job status check failed');
+        continue; // retry
+      }
       
       if (jobStatus.status === 'COMPLETED') {
-        // Fetch transcript using signed S3 request instead of presigned URL
         const outputKey = `${awsConfig.s3Prefix}live-output/${jobName}.json`;
         
         try {
@@ -586,45 +648,60 @@ serve(async (req) => {
           transcriptText = parsed.text;
           segments = parsed.segments;
         } catch (fetchError) {
-          // SECURITY: Do not log error details
           console.error('[transcribe-audio-live] Failed to fetch transcript from S3');
           return new Response(
-            JSON.stringify({ error: 'Failed to fetch transcript', code: 'TRANSCRIPT_FETCH_ERROR' }),
+            JSON.stringify({ 
+              text: '', 
+              segments: [], 
+              chunkIndex,
+              meta: { receivedBytes, mimeType, chunkIndex, providerError: String(fetchError) } 
+            }),
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
         break;
       } else if (jobStatus.status === 'FAILED') {
-        // SECURITY: Do not log failure reason
         console.error('[transcribe-audio-live] Transcription job failed');
         return new Response(
-          JSON.stringify({ error: 'Transcription failed', code: 'TRANSCRIPTION_FAILED' }),
+          JSON.stringify({ 
+            text: '', 
+            segments: [], 
+            chunkIndex,
+            meta: { receivedBytes, mimeType, chunkIndex, providerError: jobStatus.failureReason || 'TRANSCRIPTION_FAILED' } 
+          }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
     }
 
+    // Cleanup
     try {
       await deleteMedicalTranscriptionJob(jobName, awsConfig.accessKeyId, awsConfig.secretAccessKey, awsConfig.region);
-    } catch (cleanupError) {
-      // SECURITY: Do not log cleanup errors
+    } catch (_cleanupError) {
+      // Ignore cleanup errors
     }
 
-    // SECURITY: Do not log transcript content
+    // PHI-safe response logging: only lengths
+    console.log('[transcribe-audio-live] response meta', { 
+      receivedBytes, 
+      textLen: transcriptText.trim().length, 
+      segmentsLen: segments.length,
+      chunkIndex 
+    });
 
     return new Response(
       JSON.stringify({ 
         text: transcriptText,
         segments,
         chunkIndex,
-        isPartial: false
+        isPartial: false,
+        meta: { receivedBytes, mimeType, chunkIndex }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    // SECURITY: Do not log error details
-    console.error('[transcribe-audio-live] Internal error');
+    console.error('[transcribe-audio-live] Internal error', { error: String(error) });
     return new Response(
       JSON.stringify({ error: 'An unexpected error occurred', code: 'INTERNAL_ERROR' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
