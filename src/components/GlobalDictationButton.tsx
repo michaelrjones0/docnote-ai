@@ -5,7 +5,7 @@
  * Placed in main header/toolbar area.
  */
 
-import { Mic, MicOff, Loader2 } from 'lucide-react';
+import { Mic, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useGlobalDictation } from '@/hooks/useGlobalDictation';
 import { useToast } from '@/hooks/use-toast';
@@ -45,26 +45,19 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
   const isIdle = status === 'idle';
 
   const getButtonContent = () => {
-    if (isListening) {
+    if (isIdle) {
       return (
         <>
-          <MicOff className="h-4 w-4 mr-2" />
-          Stop Dictation
+          <Mic className="h-4 w-4 mr-2" />
+          Dictate
         </>
       );
     }
-    if (isTranscribing) {
-      return (
-        <>
-          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-          Transcribing…
-        </>
-      );
-    }
+    // Both listening and transcribing show Stop
     return (
       <>
-        <Mic className="h-4 w-4 mr-2" />
-        Dictate
+        <MicOff className="h-4 w-4 mr-2" />
+        Stop Dictation
       </>
     );
   };
@@ -94,7 +87,6 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
         onClick={toggle}
         onMouseDown={(e) => e.preventDefault()}
         onPointerDown={(e) => e.preventDefault()}
-        disabled={isTranscribing}
         className={cn(
           'transition-all',
           isListening && 'animate-pulse'
