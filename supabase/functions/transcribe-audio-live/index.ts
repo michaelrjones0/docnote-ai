@@ -495,7 +495,7 @@ serve(async (req) => {
       );
     }
 
-    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex, mimeType: inputMimeType } = requestBody;
+    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex, mimeType: inputMimeType, debug = false } = requestBody;
     
     // Normalize base64 input: could be raw base64 or data URL
     const rawAudio = typeof audio === 'string' ? audio : '';
@@ -733,18 +733,23 @@ serve(async (req) => {
       // Ignore cleanup errors
     }
 
-    // PHI-safe response logging: only lengths
+    // PHI-safe response logging: only lengths, never content
+    const textLen = transcriptText.trim().length;
+    const segmentsLen = segments.length;
     console.log('[transcribe-audio-live] response meta', { 
       receivedBytes, 
-      textLen: transcriptText.trim().length, 
-      segmentsLen: segments.length,
-      chunkIndex 
+      textLen, 
+      segmentsLen,
+      chunkIndex,
+      debug,
     });
 
+    // PHI-SAFE: Only return text/segments content when debug=true (development)
+    // Production requests get empty content but full metadata
     return new Response(
       JSON.stringify({ 
-        text: transcriptText,
-        segments,
+        text: debug ? transcriptText : '',
+        segments: debug ? segments : [],
         chunkIndex,
         isPartial: false,
         meta: { 
@@ -753,6 +758,8 @@ serve(async (req) => {
           chunkIndex,
           wavValidation,
           wavDataLength: wavData.length,
+          textLen,
+          segmentsLen,
         }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

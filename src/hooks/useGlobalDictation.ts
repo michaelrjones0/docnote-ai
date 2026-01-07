@@ -201,6 +201,8 @@ export function useGlobalDictation({
         });
       }
 
+      // PHI-SAFE: Only request full transcript content in debug mode
+      // Production requests get empty text but full metadata (textLen, segmentsLen)
       const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-live', {
         body: {
           audio: wavBase64,
@@ -208,13 +210,14 @@ export function useGlobalDictation({
           mimeType: 'audio/wav', // Now sending actual WAV
           sampleRate: 16000,
           encoding: 'pcm16',
+          debug: DEBUG_AUDIO, // Only true in dev/demo mode
         },
       });
 
-      // PHI-safe debug log after response (no transcript text)
+      // PHI-safe debug log after response (only lengths, never content)
       console.log('[GlobalDictation] response meta', { 
-        textLen: (data?.text?.trim()?.length ?? 0), 
-        segmentsLen: (data?.segments?.length ?? null),
+        textLen: data?.meta?.textLen ?? (data?.text?.trim()?.length ?? 0), 
+        segmentsLen: data?.meta?.segmentsLen ?? (data?.segments?.length ?? 0),
         meta: data?.meta,
       });
 
