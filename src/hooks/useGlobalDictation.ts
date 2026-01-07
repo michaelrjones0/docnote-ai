@@ -27,6 +27,9 @@ import { safeErrorLog, safeLog } from '@/lib/debug';
 
 export type GlobalDictationStatus = 'idle' | 'listening' | 'transcribing';
 
+// Minimum audio buffer size to attempt transcription (12 KB)
+const MIN_BYTES = 12_000;
+
 interface UseGlobalDictationOptions {
   chunkIntervalMs?: number;
   onError?: (error: string) => void;
@@ -79,33 +82,48 @@ export function useGlobalDictation({
       return;
     }
 
+    // Build blob to check size BEFORE clearing chunks
+    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    
+    // If buffer is too small, keep accumulating - do NOT clear chunks
+    if (audioBlob.size < MIN_BYTES) {
+      safeLog('[GlobalDictation] Audio buffer too small, accumulating', { 
+        audioBytes: audioBlob.size, 
+        minBytes: MIN_BYTES 
+      });
+      // Ensure status stays as listening if recording
+      if (mediaRecorderRef.current?.state === 'recording') {
+        setStatus('listening');
+      }
+      return;
+    }
+
     isProcessingRef.current = true;
     setStatus('transcribing');
 
-    // Take current chunks and clear for next batch
+    // Only now copy and clear chunks (buffer is large enough)
     const audioChunks = [...chunksRef.current];
     chunksRef.current = [];
 
     try {
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const transcribeBlob = new Blob(audioChunks, { type: 'audio/webm' });
       
-      if (audioBlob.size < 100) {
-        safeLog('[GlobalDictation] Chunk too small, skipping');
-        isProcessingRef.current = false;
-        setStatus('listening');
-        return;
-      }
+      // PHI-safe debug log before calling edge function
+      console.log('[GlobalDictation] sending audioBytes:', transcribeBlob.size, 'mimeType:', transcribeBlob.type);
 
-      const base64 = await blobToBase64(audioBlob);
+      const base64 = await blobToBase64(transcribeBlob);
       const startTime = Date.now();
 
       const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-live', {
         body: {
           audio: base64,
           chunkIndex: 0,
-          mimeType: audioBlob.type || 'audio/webm',
+          mimeType: transcribeBlob.type || 'audio/webm',
         },
       });
+
+      // PHI-safe debug log after response
+      console.log('[GlobalDictation] hasText:', Boolean(data?.text?.trim()));
 
       safeLog('[GlobalDictation] Transcription complete', { 
         durationMs: Date.now() - startTime,
