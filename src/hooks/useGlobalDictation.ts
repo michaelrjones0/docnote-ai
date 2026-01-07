@@ -56,6 +56,8 @@ export function useGlobalDictation({
   const pendingBlobsRef = useRef<Blob[]>([]);
   const isProcessingRef = useRef(false);
   const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // WebM init segment (first chunk with headers) - needed for subsequent chunk decoding
+  const webmInitBlobRef = useRef<Blob | null>(null);
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -69,6 +71,7 @@ export function useGlobalDictation({
     }
     mediaRecorderRef.current = null;
     pendingBlobsRef.current = [];
+    webmInitBlobRef.current = null;
     isProcessingRef.current = false;
     setIsDictating(false);
   }, [setIsDictating]);
@@ -86,9 +89,22 @@ export function useGlobalDictation({
       return;
     }
 
-    const blob = pendingBlobsRef.current[0];
+    // Build a blob with init segment prepended (needed for webm decoding)
+    const init = webmInitBlobRef.current;
+    const parts = init ? [init, ...pendingBlobsRef.current] : [...pendingBlobsRef.current];
+    const blobMimeType = init?.type || pendingBlobsRef.current[0]?.type || 'audio/webm;codecs=opus';
+    const blob = new Blob(parts, { type: blobMimeType });
     
-    // If blob is too small, keep it and wait for next chunk to combine
+    if (DEBUG_AUDIO) {
+      console.log('[DictationAudioDebug] initSegment', {
+        hasInit: !!init,
+        initSize: init?.size,
+        batchChunks: pendingBlobsRef.current.length,
+        combinedBlobSize: blob.size,
+      });
+    }
+    
+    // If combined blob is too small, wait for more chunks
     if (blob.size < MIN_BYTES) {
       safeLog('[GlobalDictation] Audio blob too small, waiting for more', { 
         audioBytes: blob.size, 
@@ -97,8 +113,8 @@ export function useGlobalDictation({
       return;
     }
 
-    // Pop the blob and start processing
-    pendingBlobsRef.current.shift();
+    // Clear pending chunks (but keep init for next batch)
+    pendingBlobsRef.current = [];
     isProcessingRef.current = true;
     setStatus('transcribing');
 
@@ -242,7 +258,9 @@ export function useGlobalDictation({
     if (status !== 'idle') return;
 
     try {
+      // Reset for new recording session
       pendingBlobsRef.current = [];
+      webmInitBlobRef.current = null;
       setError(null);
       
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -265,6 +283,16 @@ export function useGlobalDictation({
 
       recorder.ondataavailable = (event) => {
         if (event.data?.size > 0) {
+          // Capture first chunk as init segment (contains webm headers)
+          if (!webmInitBlobRef.current) {
+            webmInitBlobRef.current = event.data;
+            if (DEBUG_AUDIO) {
+              console.log('[DictationAudioDebug] captured init segment', {
+                initSize: event.data.size,
+                initType: event.data.type,
+              });
+            }
+          }
           pendingBlobsRef.current.push(event.data);
           processNextBlob();
         }
