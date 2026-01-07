@@ -36,7 +36,7 @@ export type GlobalDictationStatus = 'idle' | 'listening' | 'transcribing';
 const TARGET_SAMPLE_RATE = 16000;     // Output sample rate for transcription
 const TARGET_DURATION_MS = 800;       // Target audio duration per batch (~800ms)
 const MIN_SAMPLES = TARGET_SAMPLE_RATE * 0.5; // Minimum samples (~500ms = 8000 samples)
-const DEDUP_TOLERANCE_MS = 80;        // Tolerance for segment deduplication
+const TAIL_DEDUP_CHARS = 40;          // Keep last N chars for text-based dedup
 
 // Queued batch type: WAV bytes ready to send
 interface QueuedBatch {
@@ -106,7 +106,7 @@ export function useGlobalDictation({
   // Processing state
   const isProcessingRef = useRef(false);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastCommittedEndMsRef = useRef<number>(0);
+  const lastInsertedTailRef = useRef<string>(''); // Last N chars inserted for text dedup
   const recordingStartTimeRef = useRef<number>(0);
   const lastBatchTimeRef = useRef<number>(0);
   const isActiveRef = useRef(false); // Track if dictation is active
@@ -148,7 +148,7 @@ export function useGlobalDictation({
     
     pcmBufferRef.current = [];
     sendQueueRef.current = [];
-    lastCommittedEndMsRef.current = 0;
+    lastInsertedTailRef.current = '';
     recordingStartTimeRef.current = 0;
     lastBatchTimeRef.current = 0;
     isProcessingRef.current = false;
@@ -382,35 +382,53 @@ export function useGlobalDictation({
         return;
       }
       
-      // Dedupe insertion using segment timestamps
-      const segments = Array.isArray(data?.segments) ? data.segments : [];
-      const lastEnd = lastCommittedEndMsRef.current;
-      
-      const newSegments = segments
-        .filter((s: { endMs?: number }) => typeof s?.endMs === 'number' && s.endMs > lastEnd + DEDUP_TOLERANCE_MS)
-        .sort((a: { startMs?: number }, b: { startMs?: number }) => (a.startMs ?? 0) - (b.startMs ?? 0));
-      
-      const deltaText = newSegments.map((s: { content?: string }) => s.content || '').join(' ').trim();
-      const newMaxEndMs = newSegments.length > 0 
-        ? Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0))
-        : lastEnd;
+      // Get full text from response (no segment filtering - each batch is independent)
+      const fullText = (data?.text || '').trim();
       
       if (DEBUG_AUDIO) {
         console.log('[GlobalDictation] batchRespMeta', {
-          segmentsLen: segments.length,
-          newSegmentsLen: newSegments.length,
-          lastCommittedEndMs: newMaxEndMs,
+          textLen: fullText.length,
           isStopping: isStoppingRef.current,
           sendQueueLen: sendQueueRef.current.length,
           pendingChunksCount: pcmBufferRef.current.length,
         });
       }
       
-      // Allow inserting even after Stop was pressed (until drain is complete)
-      if (deltaText) {
-        const inserted = insertText(deltaText + ' ');
+      if (!fullText) return;
+      
+      // Text-based dedup: trim any prefix overlap with last inserted tail
+      let textToInsert = fullText;
+      const tail = lastInsertedTailRef.current;
+      
+      if (tail.length > 0) {
+        // Find longest suffix of tail that matches prefix of new text
+        const maxCheck = Math.min(tail.length, fullText.length);
+        let overlapLen = 0;
+        
+        for (let len = 1; len <= maxCheck; len++) {
+          const tailSuffix = tail.slice(-len).toLowerCase();
+          const textPrefix = fullText.slice(0, len).toLowerCase();
+          if (tailSuffix === textPrefix) {
+            overlapLen = len;
+          }
+        }
+        
+        if (overlapLen > 0) {
+          textToInsert = fullText.slice(overlapLen).trimStart();
+          if (DEBUG_AUDIO) {
+            console.log('[GlobalDictation] trimmed overlap', { overlapLen, originalLen: fullText.length });
+          }
+        }
+      }
+      
+      // Insert text and update tail
+      if (textToInsert) {
+        const toInsert = textToInsert + ' ';
+        const inserted = insertText(toInsert);
         if (inserted) {
-          lastCommittedEndMsRef.current = newMaxEndMs;
+          // Update tail with last N chars
+          const combined = tail + toInsert;
+          lastInsertedTailRef.current = combined.slice(-TAIL_DEDUP_CHARS);
         } else {
           safeLog('[GlobalDictation] Failed to insert text - no active field');
         }
@@ -458,7 +476,7 @@ export function useGlobalDictation({
       isStoppingRef.current = false;
       
       pcmBufferRef.current = [];
-      lastCommittedEndMsRef.current = 0;
+      lastInsertedTailRef.current = '';
       recordingStartTimeRef.current = Date.now();
       lastBatchTimeRef.current = 0;
       setError(null);
@@ -649,7 +667,7 @@ export function useGlobalDictation({
     
     pcmBufferRef.current = [];
     sendQueueRef.current = [];
-    lastCommittedEndMsRef.current = 0;
+    lastInsertedTailRef.current = '';
     recordingStartTimeRef.current = 0;
     lastBatchTimeRef.current = 0;
     isProcessingRef.current = false;
