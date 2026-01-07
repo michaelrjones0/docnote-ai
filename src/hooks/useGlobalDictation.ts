@@ -48,10 +48,9 @@ export function useGlobalDictation({
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const pendingBlobsRef = useRef<Blob[]>([]);
   const isProcessingRef = useRef(false);
   const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pendingTranscriptionRef = useRef<Promise<void> | null>(null);
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -64,55 +63,46 @@ export function useGlobalDictation({
       streamRef.current = null;
     }
     mediaRecorderRef.current = null;
-    chunksRef.current = [];
+    pendingBlobsRef.current = [];
     isProcessingRef.current = false;
     setIsDictating(false);
   }, [setIsDictating]);
 
-  // Process accumulated audio chunks
-  const processChunks = useCallback(async () => {
-    if (isProcessingRef.current || chunksRef.current.length === 0) return;
+  // Process next blob from queue sequentially
+  const processNextBlob = useCallback(async () => {
+    if (isProcessingRef.current || pendingBlobsRef.current.length === 0) return;
     
     const activeField = getActiveField();
     if (!activeField) {
-      // Clear chunks to prevent dumping into next field later
-      chunksRef.current = [];
-      safeLog('[GlobalDictation] No active field, clearing chunks');
+      // Clear queue to prevent dumping into next field later
+      pendingBlobsRef.current = [];
+      safeLog('[GlobalDictation] No active field, clearing queue');
       onNoFieldFocused?.();
       return;
     }
 
-    // Build blob to check size BEFORE clearing chunks
-    const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+    const blob = pendingBlobsRef.current[0];
     
-    // If buffer is too small, keep accumulating - do NOT clear chunks
-    if (audioBlob.size < MIN_BYTES) {
-      safeLog('[GlobalDictation] Audio buffer too small, accumulating', { 
-        audioBytes: audioBlob.size, 
+    // If blob is too small, keep it and wait for next chunk to combine
+    if (blob.size < MIN_BYTES) {
+      safeLog('[GlobalDictation] Audio blob too small, waiting for more', { 
+        audioBytes: blob.size, 
         minBytes: MIN_BYTES 
       });
-      // Ensure status stays as listening if recording
-      if (mediaRecorderRef.current?.state === 'recording') {
-        setStatus('listening');
-      }
       return;
     }
 
+    // Pop the blob and start processing
+    pendingBlobsRef.current.shift();
     isProcessingRef.current = true;
     setStatus('transcribing');
 
-    // Only now copy and clear chunks (buffer is large enough)
-    const audioChunks = [...chunksRef.current];
-    chunksRef.current = [];
-
     try {
-      const transcribeBlob = new Blob(audioChunks, { type: 'audio/webm' });
-      
       // PHI-safe audio signal check using WebAudio
-      const { decodeOk, rms, peak } = await getAudioLevels(transcribeBlob);
+      const { decodeOk, rms, peak } = await getAudioLevels(blob);
       console.log('[GlobalDictation] sending audio', { 
-        audioBytes: transcribeBlob.size, 
-        mimeType: transcribeBlob.type, 
+        audioBytes: blob.size, 
+        mimeType: blob.type, 
         decodeOk, 
         rms, 
         peak 
@@ -121,27 +111,31 @@ export function useGlobalDictation({
       // Skip transcription if near-silence
       if (decodeOk && peak < 0.01) {
         console.log('[GlobalDictation] near-silence, skipping transcription', { 
-          audioBytes: transcribeBlob.size, 
-          mimeType: transcribeBlob.type, 
+          audioBytes: blob.size, 
+          mimeType: blob.type, 
           rms, 
           peak 
         });
         onError?.('No microphone input detected (audio is near-silence). Check mic selection/permissions.');
+        isProcessingRef.current = false;
         if (mediaRecorderRef.current?.state === 'recording') {
           setStatus('listening');
         }
-        isProcessingRef.current = false;
+        // Process next blob if any
+        if (pendingBlobsRef.current.length > 0) {
+          processNextBlob();
+        }
         return;
       }
 
-      const base64 = await blobToBase64(transcribeBlob);
+      const base64 = await blobToBase64(blob);
       const startTime = Date.now();
 
       const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-live', {
         body: {
           audio: base64,
           chunkIndex: 0,
-          mimeType: transcribeBlob.type || 'audio/webm',
+          mimeType: blob.type || 'audio/webm',
         },
       });
 
@@ -179,6 +173,10 @@ export function useGlobalDictation({
       if (mediaRecorderRef.current?.state === 'recording') {
         setStatus('listening');
       }
+      // Process next blob in queue
+      if (pendingBlobsRef.current.length > 0) {
+        processNextBlob();
+      }
     }
   }, [getActiveField, insertText, onError, onNoFieldFocused]);
 
@@ -187,7 +185,7 @@ export function useGlobalDictation({
     if (status !== 'idle') return;
 
     try {
-      chunksRef.current = [];
+      pendingBlobsRef.current = [];
       setError(null);
       
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -209,27 +207,25 @@ export function useGlobalDictation({
       });
 
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunksRef.current.push(event.data);
+        if (event.data?.size > 0) {
+          pendingBlobsRef.current.push(event.data);
+          processNextBlob();
         }
       };
 
-      recorder.onstop = async () => {
-        // Process any remaining chunks on stop
-        if (chunksRef.current.length > 0) {
-          await processChunks();
-        }
+      recorder.onstop = () => {
         cleanup();
         setStatus('idle');
       };
 
       mediaRecorderRef.current = recorder;
-      recorder.start(500); // Collect data every 500ms
+      // Start with NO timeslice - we'll use requestData() on interval
+      recorder.start();
 
-      // Set up interval to process chunks
+      // Set up interval to request data chunks
       chunkIntervalRef.current = setInterval(() => {
-        if (chunksRef.current.length > 0 && !isProcessingRef.current) {
-          processChunks();
+        if (recorder.state === 'recording') {
+          recorder.requestData();
         }
       }, chunkIntervalMs);
 
@@ -245,7 +241,7 @@ export function useGlobalDictation({
       onError?.(errorMessage);
       cleanup();
     }
-  }, [status, chunkIntervalMs, processChunks, cleanup, setIsDictating, onError]);
+  }, [status, chunkIntervalMs, processNextBlob, cleanup, setIsDictating, onError]);
 
   // Stop recording
   const stopRecording = useCallback(async () => {
@@ -262,22 +258,29 @@ export function useGlobalDictation({
       chunkIntervalRef.current = null;
     }
 
-    // If we have pending chunks, process them before stopping
-    if (chunksRef.current.length > 0 && !isProcessingRef.current) {
+    // Request final data before stopping
+    if (recorder.state === 'recording') {
       setStatus('transcribing');
-      pendingTranscriptionRef.current = processChunks();
-      await pendingTranscriptionRef.current;
-    }
-
-    if (recorder.state !== 'inactive') {
+      recorder.requestData();
+      
+      // Give a moment for ondataavailable to fire, then stop
+      await new Promise(resolve => setTimeout(resolve, 100));
       recorder.stop();
+      
+      // Wait for any pending transcription to complete
+      while (isProcessingRef.current || pendingBlobsRef.current.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+        if (!isProcessingRef.current && pendingBlobsRef.current.length > 0) {
+          await processNextBlob();
+        }
+      }
     } else {
       cleanup();
       setStatus('idle');
     }
 
     safeLog('[GlobalDictation] Recording stopped');
-  }, [cleanup, processChunks]);
+  }, [cleanup, processNextBlob]);
 
   // Toggle function - always allow stopping if recording
   const toggle = useCallback(async () => {
