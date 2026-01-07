@@ -108,8 +108,31 @@ export function useGlobalDictation({
     try {
       const transcribeBlob = new Blob(audioChunks, { type: 'audio/webm' });
       
-      // PHI-safe debug log before calling edge function
-      console.log('[GlobalDictation] sending audioBytes:', transcribeBlob.size, 'mimeType:', transcribeBlob.type);
+      // PHI-safe audio signal check using WebAudio
+      const { decodeOk, rms, peak } = await getAudioLevels(transcribeBlob);
+      console.log('[GlobalDictation] sending audio', { 
+        audioBytes: transcribeBlob.size, 
+        mimeType: transcribeBlob.type, 
+        decodeOk, 
+        rms, 
+        peak 
+      });
+
+      // Skip transcription if near-silence
+      if (decodeOk && peak < 0.01) {
+        console.log('[GlobalDictation] near-silence, skipping transcription', { 
+          audioBytes: transcribeBlob.size, 
+          mimeType: transcribeBlob.type, 
+          rms, 
+          peak 
+        });
+        onError?.('No microphone input detected (audio is near-silence). Check mic selection/permissions.');
+        if (mediaRecorderRef.current?.state === 'recording') {
+          setStatus('listening');
+        }
+        isProcessingRef.current = false;
+        return;
+      }
 
       const base64 = await blobToBase64(transcribeBlob);
       const startTime = Date.now();
@@ -122,8 +145,11 @@ export function useGlobalDictation({
         },
       });
 
-      // PHI-safe debug log after response
-      console.log('[GlobalDictation] hasText:', Boolean(data?.text?.trim()));
+      // PHI-safe debug log after response (no transcript text)
+      console.log('[GlobalDictation] response meta', { 
+        textLen: (data?.text?.trim()?.length ?? 0), 
+        segmentsLen: (data?.segments?.length ?? null) 
+      });
 
       safeLog('[GlobalDictation] Transcription complete', { 
         durationMs: Date.now() - startTime,
@@ -305,4 +331,26 @@ async function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
+}
+
+// Helper to get audio levels for silence detection (PHI-safe)
+async function getAudioLevels(blob: Blob): Promise<{ decodeOk: boolean; rms: number; peak: number }> {
+  try {
+    const ab = await blob.arrayBuffer();
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioBuf = await ctx.decodeAudioData(ab.slice(0));
+    const data = audioBuf.getChannelData(0);
+    let sumSq = 0;
+    let peak = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = Math.abs(data[i]);
+      if (v > peak) peak = v;
+      sumSq += data[i] * data[i];
+    }
+    const rms = Math.sqrt(sumSq / Math.max(1, data.length));
+    await ctx.close();
+    return { decodeOk: true, rms, peak };
+  } catch {
+    return { decodeOk: false, rms: 0, peak: 0 };
+  }
 }
