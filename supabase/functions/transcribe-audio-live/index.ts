@@ -528,6 +528,38 @@ serve(async (req) => {
     // Strip codecs from mimeType for content-type header
     const mimeType = (inputMimeType || 'audio/webm').split(';')[0];
     
+    // ========================================================================
+    // PHI-safe WAV header validation (if mimeType is audio/wav)
+    // ========================================================================
+    let wavValidation: Record<string, unknown> | null = null;
+    if (mimeType === 'audio/wav' && receivedBytes >= 44) {
+      const isRiff = pcmData[0] === 0x52 && pcmData[1] === 0x49 && pcmData[2] === 0x46 && pcmData[3] === 0x46;
+      const isWave = pcmData[8] === 0x57 && pcmData[9] === 0x41 && pcmData[10] === 0x56 && pcmData[11] === 0x45;
+      const fmtChunkFound = pcmData[12] === 0x66 && pcmData[13] === 0x6D && pcmData[14] === 0x74 && pcmData[15] === 0x20;
+      
+      const view = new DataView(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength);
+      const numChannels = fmtChunkFound ? view.getUint16(22, true) : 0;
+      const wavSampleRate = fmtChunkFound ? view.getUint32(24, true) : 0;
+      const bitsPerSample = fmtChunkFound ? view.getUint16(34, true) : 0;
+      const dataBytes = view.getUint32(40, true);
+      
+      // First 16 bytes as hex for debugging (PHI-safe - just header)
+      const first16Hex = Array.from(pcmData.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      
+      wavValidation = {
+        isRiff,
+        isWave,
+        fmtChunkFound,
+        numChannels,
+        wavSampleRate,
+        bitsPerSample,
+        dataBytes,
+        first16Hex,
+      };
+      
+      console.log('[transcribe-audio-live] WAV validation', wavValidation);
+    }
+    
     // PHI-safe logging: only byte counts
     console.log('[transcribe-audio-live] received', { receivedBytes, mimeType, chunkIndex });
 
@@ -540,7 +572,7 @@ serve(async (req) => {
           segments: [], 
           chunkIndex,
           isPartial: false,
-          meta: { receivedBytes, mimeType, chunkIndex, skipped: 'too_small' } 
+          meta: { receivedBytes, mimeType, chunkIndex, skipped: 'too_small', wavValidation } 
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -558,11 +590,31 @@ serve(async (req) => {
       );
     }
 
-    // Create WAV file from PCM data (binary bytes, not base64)
-    const wavHeader = createWavHeader(pcmData.length, sampleRate, 1, 16);
-    const wavData = new Uint8Array(wavHeader.length + pcmData.length);
-    wavData.set(wavHeader, 0);
-    wavData.set(pcmData, wavHeader.length);
+    // Determine if incoming data is already WAV or needs header
+    let wavData: Uint8Array;
+    const isAlreadyWav = mimeType === 'audio/wav' && 
+      pcmData.length >= 44 && 
+      pcmData[0] === 0x52 && pcmData[1] === 0x49 && pcmData[2] === 0x46 && pcmData[3] === 0x46;
+    
+    if (isAlreadyWav) {
+      // Data already has WAV header, use as-is
+      wavData = pcmData;
+      console.log('[transcribe-audio-live] using incoming WAV data directly', { 
+        wavDataLength: wavData.length,
+        isAlreadyWav: true 
+      });
+    } else {
+      // Create WAV file from raw PCM data (legacy path)
+      const wavHeader = createWavHeader(pcmData.length, sampleRate, 1, 16);
+      wavData = new Uint8Array(wavHeader.length + pcmData.length);
+      wavData.set(wavHeader, 0);
+      wavData.set(pcmData, wavHeader.length);
+      console.log('[transcribe-audio-live] created WAV from raw PCM', { 
+        rawPcmLength: pcmData.length,
+        wavDataLength: wavData.length,
+        isAlreadyWav: false 
+      });
+    }
 
     const timestamp = Date.now();
     const chunkId = crypto.randomUUID().slice(0, 8);
@@ -695,7 +747,13 @@ serve(async (req) => {
         segments,
         chunkIndex,
         isPartial: false,
-        meta: { receivedBytes, mimeType, chunkIndex }
+        meta: { 
+          receivedBytes, 
+          mimeType, 
+          chunkIndex,
+          wavValidation,
+          wavDataLength: wavData.length,
+        }
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
