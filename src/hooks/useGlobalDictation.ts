@@ -58,6 +58,8 @@ export function useGlobalDictation({
   const chunkIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // WebM init segment (first chunk with headers) - needed for subsequent chunk decoding
   const webmInitBlobRef = useRef<Blob | null>(null);
+  // Track last inserted segment endMs to dedupe overlapping transcripts
+  const lastInsertedEndMsRef = useRef<number>(0);
 
   // Cleanup function
   const cleanup = useCallback(() => {
@@ -72,6 +74,7 @@ export function useGlobalDictation({
     mediaRecorderRef.current = null;
     pendingBlobsRef.current = [];
     webmInitBlobRef.current = null;
+    lastInsertedEndMsRef.current = 0;
     isProcessingRef.current = false;
     setIsDictating(false);
   }, [setIsDictating]);
@@ -230,11 +233,32 @@ export function useGlobalDictation({
         throw fnError;
       }
 
-      const text = data?.text?.trim() || '';
-      
-      if (text) {
-        const inserted = insertText(text);
-        if (!inserted) {
+      // Dedupe insertion using segment timestamps to avoid repeating overlapping content
+      const segments = Array.isArray(data?.segments) ? data.segments : [];
+      const lastEnd = lastInsertedEndMsRef.current;
+
+      // Filter to only new segments beyond what we've already inserted (50ms tolerance)
+      const newSegments = segments
+        .filter((s: { endMs?: number }) => typeof s?.endMs === 'number' && s.endMs > lastEnd + 50)
+        .sort((a: { startMs?: number }, b: { startMs?: number }) => (a.startMs ?? 0) - (b.startMs ?? 0));
+
+      const toInsert = newSegments.map((s: { content?: string }) => s.content || '').join(' ').trim();
+
+      // PHI-safe debug log (only lengths and timing, never content)
+      console.log('[GlobalDictation] insertDedup', {
+        lastEndBefore: lastEnd,
+        segmentsIn: segments.length,
+        segmentsInserted: newSegments.length,
+        lastEndAfter: newSegments.length > 0 
+          ? Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0))
+          : lastEnd,
+      });
+
+      if (toInsert) {
+        const inserted = insertText(toInsert + ' ');
+        if (inserted) {
+          lastInsertedEndMsRef.current = Math.max(lastEnd, ...newSegments.map((s: { endMs?: number }) => s.endMs || 0));
+        } else {
           safeLog('[GlobalDictation] Failed to insert text - no active field');
         }
       }
@@ -264,6 +288,7 @@ export function useGlobalDictation({
       // Reset for new recording session
       pendingBlobsRef.current = [];
       webmInitBlobRef.current = null;
+      lastInsertedEndMsRef.current = 0;
       setError(null);
       
       const stream = await navigator.mediaDevices.getUserMedia({
