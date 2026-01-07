@@ -25,6 +25,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { useDictationContext } from '@/contexts/DictationContext';
 import { safeErrorLog, safeLog } from '@/lib/debug';
 
+// ============================================================================
+// TEMPORARY DEBUG FLAG - set to true to enable PHI-safe audio diagnostics
+// ============================================================================
+const DEBUG_AUDIO = true;
+
 export type GlobalDictationStatus = 'idle' | 'listening' | 'transcribing';
 
 // Minimum audio buffer size to attempt transcription (12 KB)
@@ -98,15 +103,23 @@ export function useGlobalDictation({
     setStatus('transcribing');
 
     try {
-      // PHI-safe audio signal check using WebAudio
-      const { decodeOk, rms, peak } = await getAudioLevels(blob);
-      console.log('[GlobalDictation] sending audio', { 
-        audioBytes: blob.size, 
-        mimeType: blob.type, 
-        decodeOk, 
-        rms, 
-        peak 
-      });
+      // ========================================================================
+      // STEP 1: PHI-safe audio signal check using WebAudio (decode webm)
+      // ========================================================================
+      const { decodeOk, rms, peak, sampleRate: srcSampleRate, channels: srcChannels, duration: srcDuration } = await getAudioLevels(blob);
+      
+      if (DEBUG_AUDIO) {
+        console.log('[DictationAudioDebug] step=getAudioLevels', {
+          blobSize: blob.size,
+          blobType: blob.type,
+          decodeOk,
+          rms: rms.toFixed(6),
+          peak: peak.toFixed(6),
+          srcSampleRate,
+          srcChannels,
+          srcDuration: srcDuration?.toFixed(3),
+        });
+      }
 
       // Skip transcription if near-silence
       if (decodeOk && peak < 0.01) {
@@ -121,28 +134,72 @@ export function useGlobalDictation({
         if (mediaRecorderRef.current?.state === 'recording') {
           setStatus('listening');
         }
-        // Process next blob if any
         if (pendingBlobsRef.current.length > 0) {
           processNextBlob();
         }
         return;
       }
 
-      const base64 = await blobToBase64(blob);
+      // ========================================================================
+      // STEP 2: Decode webm -> resample to 16kHz mono -> encode WAV PCM16
+      // ========================================================================
+      let wavBase64: string;
+      let wavBytes: Uint8Array;
+      
+      try {
+        const result = await convertToWav16kMono(blob);
+        wavBase64 = result.base64;
+        wavBytes = result.wavBytes;
+        
+        if (DEBUG_AUDIO) {
+          // Validate WAV header
+          const wavValidation = validateWavHeader(wavBytes);
+          const first16Hex = Array.from(wavBytes.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          
+          console.log('[DictationAudioDebug] step=convertToWav16kMono', {
+            wavBytesLength: wavBytes.length,
+            base64Length: wavBase64.length,
+            first16Hex,
+            ...wavValidation
+          });
+        }
+      } catch (convErr) {
+        console.error('[DictationAudioDebug] step=convertToWav16kMono errorName=' + (convErr instanceof Error ? convErr.name : 'Unknown'), 
+          'message=' + (convErr instanceof Error ? convErr.message : String(convErr)));
+        isProcessingRef.current = false;
+        if (mediaRecorderRef.current?.state === 'recording') {
+          setStatus('listening');
+        }
+        if (pendingBlobsRef.current.length > 0) {
+          processNextBlob();
+        }
+        return;
+      }
+
       const startTime = Date.now();
+
+      if (DEBUG_AUDIO) {
+        console.log('[DictationAudioDebug] step=sendToEdge', {
+          payloadMimeType: 'audio/wav',
+          base64Length: wavBase64.length,
+        });
+      }
 
       const { data, error: fnError } = await supabase.functions.invoke('transcribe-audio-live', {
         body: {
-          audio: base64,
+          audio: wavBase64,
           chunkIndex: 0,
-          mimeType: blob.type || 'audio/webm',
+          mimeType: 'audio/wav', // Now sending actual WAV
+          sampleRate: 16000,
+          encoding: 'pcm16',
         },
       });
 
       // PHI-safe debug log after response (no transcript text)
       console.log('[GlobalDictation] response meta', { 
         textLen: (data?.text?.trim()?.length ?? 0), 
-        segmentsLen: (data?.segments?.length ?? null) 
+        segmentsLen: (data?.segments?.length ?? null),
+        meta: data?.meta,
       });
 
       safeLog('[GlobalDictation] Transcription complete', { 
@@ -337,7 +394,15 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 // Helper to get audio levels for silence detection (PHI-safe)
-async function getAudioLevels(blob: Blob): Promise<{ decodeOk: boolean; rms: number; peak: number }> {
+// Also returns source audio metadata for debugging
+async function getAudioLevels(blob: Blob): Promise<{ 
+  decodeOk: boolean; 
+  rms: number; 
+  peak: number;
+  sampleRate?: number;
+  channels?: number;
+  duration?: number;
+}> {
   try {
     const ab = await blob.arrayBuffer();
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -351,9 +416,162 @@ async function getAudioLevels(blob: Blob): Promise<{ decodeOk: boolean; rms: num
       sumSq += data[i] * data[i];
     }
     const rms = Math.sqrt(sumSq / Math.max(1, data.length));
+    const sampleRate = audioBuf.sampleRate;
+    const channels = audioBuf.numberOfChannels;
+    const duration = audioBuf.duration;
     await ctx.close();
-    return { decodeOk: true, rms, peak };
+    return { decodeOk: true, rms, peak, sampleRate, channels, duration };
   } catch {
     return { decodeOk: false, rms: 0, peak: 0 };
   }
+}
+
+// ============================================================================
+// Convert webm/opus blob -> 16kHz mono PCM16 WAV
+// ============================================================================
+async function convertToWav16kMono(blob: Blob): Promise<{ base64: string; wavBytes: Uint8Array }> {
+  // Step 1: Decode the blob (webm) into an AudioBuffer
+  const arrayBuffer = await blob.arrayBuffer();
+  const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const sourceBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+  
+  if (DEBUG_AUDIO) {
+    console.log('[DictationAudioDebug] step=decodeAudioData', {
+      sourceSampleRate: sourceBuffer.sampleRate,
+      sourceChannels: sourceBuffer.numberOfChannels,
+      sourceDuration: sourceBuffer.duration.toFixed(3),
+      sourceLength: sourceBuffer.length,
+    });
+  }
+  
+  // Step 2: Resample to 16kHz mono using OfflineAudioContext
+  const targetSampleRate = 16000;
+  const targetChannels = 1;
+  const targetLength = Math.ceil(sourceBuffer.duration * targetSampleRate);
+  
+  const offlineCtx = new OfflineAudioContext(targetChannels, targetLength, targetSampleRate);
+  const source = offlineCtx.createBufferSource();
+  source.buffer = sourceBuffer;
+  source.connect(offlineCtx.destination);
+  source.start(0);
+  
+  const resampledBuffer = await offlineCtx.startRendering();
+  
+  if (DEBUG_AUDIO) {
+    console.log('[DictationAudioDebug] step=resample', {
+      targetSampleRate: resampledBuffer.sampleRate,
+      targetChannels: resampledBuffer.numberOfChannels,
+      targetLength: resampledBuffer.length,
+      targetDuration: resampledBuffer.duration.toFixed(3),
+    });
+  }
+  
+  await audioCtx.close();
+  
+  // Step 3: Convert float samples to PCM16
+  const floatData = resampledBuffer.getChannelData(0);
+  const pcm16 = new Int16Array(floatData.length);
+  for (let i = 0; i < floatData.length; i++) {
+    const s = Math.max(-1, Math.min(1, floatData[i]));
+    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  
+  // Step 4: Create WAV header + data
+  const wavBytes = createWavFile(pcm16, targetSampleRate, targetChannels);
+  
+  if (DEBUG_AUDIO) {
+    console.log('[DictationAudioDebug] step=encodeWav', {
+      pcm16Length: pcm16.length,
+      wavBytesLength: wavBytes.length,
+    });
+  }
+  
+  // Step 5: Convert to base64
+  const base64 = uint8ArrayToBase64(wavBytes);
+  
+  return { base64, wavBytes };
+}
+
+// Create a complete WAV file from PCM16 data
+function createWavFile(pcm16: Int16Array, sampleRate: number, channels: number): Uint8Array {
+  const bitsPerSample = 16;
+  const byteRate = sampleRate * channels * (bitsPerSample / 8);
+  const blockAlign = channels * (bitsPerSample / 8);
+  const dataBytes = pcm16.length * 2; // 2 bytes per sample
+  const headerSize = 44;
+  
+  const buffer = new ArrayBuffer(headerSize + dataBytes);
+  const view = new DataView(buffer);
+  
+  // RIFF header
+  view.setUint8(0, 0x52); // R
+  view.setUint8(1, 0x49); // I
+  view.setUint8(2, 0x46); // F
+  view.setUint8(3, 0x46); // F
+  view.setUint32(4, 36 + dataBytes, true); // File size - 8
+  view.setUint8(8, 0x57);  // W
+  view.setUint8(9, 0x41);  // A
+  view.setUint8(10, 0x56); // V
+  view.setUint8(11, 0x45); // E
+  
+  // fmt chunk
+  view.setUint8(12, 0x66); // f
+  view.setUint8(13, 0x6D); // m
+  view.setUint8(14, 0x74); // t
+  view.setUint8(15, 0x20); // (space)
+  view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+  view.setUint16(20, 1, true); // AudioFormat (1 = PCM)
+  view.setUint16(22, channels, true); // NumChannels
+  view.setUint32(24, sampleRate, true); // SampleRate
+  view.setUint32(28, byteRate, true); // ByteRate
+  view.setUint16(32, blockAlign, true); // BlockAlign
+  view.setUint16(34, bitsPerSample, true); // BitsPerSample
+  
+  // data chunk
+  view.setUint8(36, 0x64); // d
+  view.setUint8(37, 0x61); // a
+  view.setUint8(38, 0x74); // t
+  view.setUint8(39, 0x61); // a
+  view.setUint32(40, dataBytes, true); // Subchunk2Size
+  
+  // Copy PCM data
+  const pcmBytes = new Uint8Array(pcm16.buffer);
+  new Uint8Array(buffer).set(pcmBytes, headerSize);
+  
+  return new Uint8Array(buffer);
+}
+
+// Convert Uint8Array to base64 (efficient chunked approach)
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000; // 32KB chunks to avoid call stack issues
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+// Validate WAV header and return PHI-safe metadata
+function validateWavHeader(wavBytes: Uint8Array): {
+  isRiff: boolean;
+  isWave: boolean;
+  fmtChunkFound: boolean;
+  numChannels: number;
+  sampleRate: number;
+  bitsPerSample: number;
+  dataBytes: number;
+} {
+  const view = new DataView(wavBytes.buffer, wavBytes.byteOffset, wavBytes.byteLength);
+  
+  const isRiff = wavBytes[0] === 0x52 && wavBytes[1] === 0x49 && wavBytes[2] === 0x46 && wavBytes[3] === 0x46;
+  const isWave = wavBytes[8] === 0x57 && wavBytes[9] === 0x41 && wavBytes[10] === 0x56 && wavBytes[11] === 0x45;
+  const fmtChunkFound = wavBytes[12] === 0x66 && wavBytes[13] === 0x6D && wavBytes[14] === 0x74 && wavBytes[15] === 0x20;
+  
+  const numChannels = fmtChunkFound ? view.getUint16(22, true) : 0;
+  const sampleRate = fmtChunkFound ? view.getUint32(24, true) : 0;
+  const bitsPerSample = fmtChunkFound ? view.getUint16(34, true) : 0;
+  const dataBytes = wavBytes.length >= 44 ? view.getUint32(40, true) : 0;
+  
+  return { isRiff, isWave, fmtChunkFound, numChannels, sampleRate, bitsPerSample, dataBytes };
 }
