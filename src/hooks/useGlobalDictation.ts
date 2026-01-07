@@ -99,10 +99,16 @@ export function useGlobalDictation({
   const recordingStartTimeRef = useRef<number>(0);
   const lastBatchTimeRef = useRef<number>(0);
   const isActiveRef = useRef(false); // Track if dictation is active
+  
+  // Session management refs for reliable flush
+  const isStoppingRef = useRef(false);
+  const activeFieldIdAtStartRef = useRef<string | null>(null);
+  const sessionIdRef = useRef(0);
 
   // Cleanup function
   const cleanup = useCallback(() => {
     isActiveRef.current = false;
+    isStoppingRef.current = false;
     
     if (batchTimerRef.current) {
       clearTimeout(batchTimerRef.current);
@@ -134,6 +140,7 @@ export function useGlobalDictation({
     recordingStartTimeRef.current = 0;
     lastBatchTimeRef.current = 0;
     isProcessingRef.current = false;
+    activeFieldIdAtStartRef.current = null;
     setIsDictating(false);
   }, [setIsDictating]);
 
@@ -214,12 +221,18 @@ export function useGlobalDictation({
   }, []);
 
   // Process current batch of PCM samples
-  const processBatch = useCallback(async () => {
+  const processBatch = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force ?? false;
+    
     if (isProcessingRef.current) return;
     if (pcmBufferRef.current.length === 0) return;
     
+    // Capture session state at batch start
+    const currentSessionId = sessionIdRef.current;
+    const targetFieldId = activeFieldIdAtStartRef.current;
+    
     const activeField = getActiveField();
-    if (!activeField) {
+    if (!activeField && !force) {
       pcmBufferRef.current = [];
       safeLog('[GlobalDictation] No active field, clearing queue');
       onNoFieldFocused?.();
@@ -231,13 +244,13 @@ export function useGlobalDictation({
     const sourceSampleRate = sourceSampleRateRef.current;
     const expectedSamplesFor16k = (totalSamples / sourceSampleRate) * TARGET_SAMPLE_RATE;
     
-    // Check if we have enough audio
+    // Check if we have enough audio (skip check if force flushing)
     const now = Date.now();
     const elapsedMs = lastBatchTimeRef.current > 0 
       ? now - lastBatchTimeRef.current 
       : now - recordingStartTimeRef.current;
     
-    if (expectedSamplesFor16k < MIN_SAMPLES && elapsedMs < TARGET_DURATION_MS) {
+    if (!force && expectedSamplesFor16k < MIN_SAMPLES && elapsedMs < TARGET_DURATION_MS) {
       scheduleBatchCheck();
       return;
     }
@@ -298,6 +311,8 @@ export function useGlobalDictation({
           durationMs: durationMs.toFixed(0),
           peak: peak.toFixed(4),
           lastCommittedEndMs: lastCommittedEndMsRef.current,
+          force,
+          sessionId: currentSessionId,
         });
       }
 
@@ -324,6 +339,17 @@ export function useGlobalDictation({
 
       if (fnError) throw fnError;
 
+      // Session validation: only insert if session matches
+      if (currentSessionId !== sessionIdRef.current) {
+        if (DEBUG_AUDIO) {
+          console.log('[GlobalDictation] session mismatch, discarding result', {
+            batchSession: currentSessionId,
+            currentSession: sessionIdRef.current,
+          });
+        }
+        return;
+      }
+
       // Dedupe insertion using segment timestamps
       const segments = Array.isArray(data?.segments) ? data.segments : [];
       const lastEnd = lastCommittedEndMsRef.current;
@@ -342,9 +368,11 @@ export function useGlobalDictation({
           segmentsLen: segments.length,
           newSegmentsLen: newSegments.length,
           lastCommittedEndMs: newMaxEndMs,
+          isStopping: isStoppingRef.current,
         });
       }
 
+      // Allow inserting even after Stop was pressed (until flush is complete)
       if (deltaText) {
         const inserted = insertText(deltaText + ' ');
         if (inserted) {
@@ -360,7 +388,7 @@ export function useGlobalDictation({
       onError?.(errorMessage);
     } finally {
       isProcessingRef.current = false;
-      if (isActiveRef.current) {
+      if (isActiveRef.current && !isStoppingRef.current) {
         setStatus('listening');
         if (pcmBufferRef.current.length > 0) {
           scheduleBatchCheck();
@@ -386,12 +414,24 @@ export function useGlobalDictation({
     if (status !== 'idle') return;
 
     try {
+      // Session management
+      sessionIdRef.current++;
+      activeFieldIdAtStartRef.current = activeFieldId;
+      isStoppingRef.current = false;
+      
       pcmBufferRef.current = [];
       lastCommittedEndMsRef.current = 0;
       recordingStartTimeRef.current = Date.now();
       lastBatchTimeRef.current = 0;
       setError(null);
       isActiveRef.current = true;
+
+      if (DEBUG_AUDIO) {
+        console.log('[GlobalDictation] startRecording', {
+          sessionId: sessionIdRef.current,
+          activeFieldId: activeFieldIdAtStartRef.current,
+        });
+      }
 
       // Get microphone stream
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -465,12 +505,14 @@ export function useGlobalDictation({
       onError?.(errorMessage);
       cleanup();
     }
-  }, [status, cleanup, setIsDictating, onError, processBatch, scheduleBatchCheck]);
+  }, [status, cleanup, setIsDictating, onError, processBatch, scheduleBatchCheck, activeFieldId]);
 
-  // Stop recording
+  // Stop recording with proper flush
   const stopRecording = useCallback(async () => {
     if (!isActiveRef.current && status === 'idle') return;
     
+    // Mark that we're stopping - prevents new audio collection
+    isStoppingRef.current = true;
     isActiveRef.current = false;
     
     if (batchTimerRef.current) {
@@ -480,20 +522,79 @@ export function useGlobalDictation({
 
     setStatus('transcribing');
 
-    // Process any remaining buffered audio
-    if (pcmBufferRef.current.length > 0 && !isProcessingRef.current) {
-      await processBatch();
+    // Stop the worklet/stream capture so no new audio comes in
+    if (workletNodeRef.current) {
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
+    }
+    
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
     }
 
-    // Wait for in-flight request to complete
+    if (DEBUG_AUDIO) {
+      console.log('[GlobalDictation] stopRecording: flushing', {
+        sessionId: sessionIdRef.current,
+        bufferChunks: pcmBufferRef.current.length,
+        isProcessing: isProcessingRef.current,
+      });
+    }
+
+    // FORCE flush loop: keep flushing until buffer is empty AND no in-flight request
+    let flushAttempts = 0;
+    const maxFlushAttempts = 20; // Safety limit (20 * 100ms = 2s max)
+    
+    while (flushAttempts < maxFlushAttempts) {
+      // Wait for any in-flight request to complete
+      while (isProcessingRef.current) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
+      // Check if there's remaining audio to flush
+      if (pcmBufferRef.current.length === 0) {
+        break; // All flushed!
+      }
+      
+      // Force flush remaining audio (even if < MIN_BYTES)
+      if (DEBUG_AUDIO) {
+        console.log('[GlobalDictation] flush attempt', {
+          attempt: flushAttempts + 1,
+          bufferChunks: pcmBufferRef.current.length,
+        });
+      }
+      
+      await processBatch({ force: true });
+      flushAttempts++;
+    }
+
+    // Final wait for last in-flight request
     while (isProcessingRef.current) {
       await new Promise(resolve => setTimeout(resolve, 50));
     }
 
-    cleanup();
+    // Now safe to fully cleanup
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    
+    pcmBufferRef.current = [];
+    lastCommittedEndMsRef.current = 0;
+    recordingStartTimeRef.current = 0;
+    lastBatchTimeRef.current = 0;
+    isProcessingRef.current = false;
+    isStoppingRef.current = false;
+    setIsDictating(false);
+    
     setStatus('idle');
-    safeLog('[GlobalDictation] Recording stopped');
-  }, [status, cleanup, processBatch]);
+    safeLog('[GlobalDictation] Recording stopped, flush complete');
+  }, [status, processBatch, setIsDictating]);
 
   // Toggle function
   const toggle = useCallback(async () => {
