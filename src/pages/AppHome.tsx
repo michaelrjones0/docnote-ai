@@ -282,6 +282,29 @@ const AppHome = () => {
       return;
     }
 
+    // Validate audio was recorded: estimate total bytes from chunks sent
+    const { chunksSent, bytesPerChunk } = liveScribe.debugInfo;
+    const estimatedBytes = chunksSent * (bytesPerChunk || 0);
+    const MIN_AUDIO_BYTES = 20_000; // 20 KB minimum
+
+    // PHI-safe debug log: only sizes and format
+    console.log('[StartBatch] audioSizeBytes:', estimatedBytes, 'chunksSent:', chunksSent, 'bytesPerChunk:', bytesPerChunk);
+
+    if (estimatedBytes < MIN_AUDIO_BYTES) {
+      toast({
+        title: 'Insufficient audio',
+        description: `Recorded audio is too small (${estimatedBytes} bytes). Please record at least a few seconds of audio before starting batch transcription.`,
+        variant: 'destructive',
+      });
+      setStartBatchResult(JSON.stringify({ 
+        ok: false, 
+        error: `Insufficient audio: ${estimatedBytes} bytes < ${MIN_AUDIO_BYTES} bytes minimum`,
+        audioSizeBytes: estimatedBytes,
+        chunksSent,
+      }, null, 2));
+      return;
+    }
+
     setIsStartingBatch(true);
     setStartBatchResult(null);
 
