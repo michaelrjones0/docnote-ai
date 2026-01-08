@@ -337,6 +337,11 @@ export function useDeepgramDictation({
       // Get temporary token from edge function
       const { data: tokenData, error: tokenError } = await supabase.functions.invoke('deepgram-token');
 
+      // Handle explicit disabled/fallback response
+      if (tokenData?.ok === false || tokenData?.fallback === 'batch') {
+        throw new Error('DEEPGRAM_DISABLED:' + (tokenData?.error || 'Token endpoint unavailable'));
+      }
+
       if (tokenError || !tokenData?.token) {
         throw new Error(tokenError?.message || 'Failed to get Deepgram token');
       }
