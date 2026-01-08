@@ -81,6 +81,8 @@ const AppHome = () => {
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
   const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
   const [showEndEncounterDialog, setShowEndEncounterDialog] = useState(false);
+  const [transcriptSource, setTranscriptSource] = useState<'live' | 'batch' | null>(null);
+  const [batchStatus, setBatchStatus] = useState<'idle' | 'starting' | 'transcribing' | 'ready' | 'error'>('idle');
   const { preferences, setPreferences } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
@@ -144,9 +146,11 @@ const AppHome = () => {
       modeSwitchBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [preferences.noteEditorMode, getCurrentNoteType, getCurrentSoap, getCurrentSoap3]);
+  
   const liveScribe = useLiveScribe({
     onTranscriptUpdate: (transcript) => {
       setTranscriptText(transcript);
+      setTranscriptSource('live');
       // Auto-scroll live transcript
       setTimeout(() => {
         if (liveTranscriptRef.current) {
@@ -176,13 +180,165 @@ const AppHome = () => {
   const handleStopLiveScribe = async () => {
     const finalTranscript = await liveScribe.stopRecording();
     
-    // Auto-generate note if we have a transcript
+    // Set live transcript as initial canonical source
     if (finalTranscript?.trim()) {
       setTranscriptText(finalTranscript);
-      // Small delay to ensure state is updated
+      setTranscriptSource('live');
+    }
+    
+    // Auto-start batch transcription for Running Summary + Final mode (B)
+    // Also start batch if we have recorded audio to get high-fidelity final transcript
+    if (docSession.liveDraftMode === 'B' || liveScribe.getEstimatedAudioBytes() > 20000) {
+      // Auto-start batch
+      await handleAutoBatchStart();
+    } else if (finalTranscript?.trim()) {
+      // For Final Note Only mode (A) without batch, auto-generate from live transcript
       setTimeout(() => {
         handleGenerateSoap();
       }, 100);
+    }
+  };
+
+  // Auto-start batch transcription (called when recording stops)
+  const handleAutoBatchStart = async () => {
+    if (!session?.access_token) {
+      toast({
+        title: 'Authentication required',
+        description: 'Please log in to start batch transcription.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const estimatedBytes = liveScribe.getEstimatedAudioBytes();
+    const MIN_AUDIO_BYTES = 20_000;
+
+    if (estimatedBytes < MIN_AUDIO_BYTES) {
+      // Not enough audio for batch, just use live transcript
+      if (docSession.transcriptText?.trim()) {
+        toast({
+          title: 'Using live transcript',
+          description: 'Recording too short for batch processing.',
+        });
+      }
+      return;
+    }
+
+    setBatchStatus('starting');
+    setIsStartingBatch(true);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-latest`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+      
+      if (data.ok && data.jobName) {
+        setJobName(data.jobName);
+        setBatchStatus('transcribing');
+        
+        toast({
+          title: 'Batch transcription started',
+          description: 'Processing audio for final transcript...',
+        });
+        
+        // Start polling for batch status
+        pollBatchStatus(data.jobName);
+      } else {
+        setBatchStatus('error');
+        toast({
+          title: 'Batch start failed',
+          description: data.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (err) {
+      setBatchStatus('error');
+      toast({
+        title: 'Batch start failed',
+        description: String(err),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsStartingBatch(false);
+    }
+  };
+
+  // Poll for batch transcription status
+  const pollBatchStatus = async (jobName: string, attempt = 0) => {
+    const MAX_ATTEMPTS = 60; // ~5 minutes with 5s interval
+    const POLL_INTERVAL = 5000;
+
+    if (attempt >= MAX_ATTEMPTS) {
+      setBatchStatus('error');
+      toast({
+        title: 'Batch transcription timeout',
+        description: 'Please try again with "Start Batch" button.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe-audio-batch-status`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session?.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ jobName }),
+        }
+      );
+
+      const data = await response.json();
+      
+      // Check if transcript is ready
+      const text = (data?.text ?? data?.result?.text) ?? '';
+      if (typeof text === 'string' && text.trim()) {
+        setTranscriptText(text.trim());
+        setTranscriptSource('batch');
+        setBatchStatus('ready');
+        
+        toast({
+          title: 'Transcript ready',
+          description: 'Final transcript available. Ready to generate SOAP.',
+        });
+        return;
+      }
+      
+      // Check for NOT_FOUND or still processing
+      if (data?.status === 'NOT_FOUND' || data?.status === 'IN_PROGRESS') {
+        // Continue polling
+        setTimeout(() => pollBatchStatus(jobName, attempt + 1), POLL_INTERVAL);
+        return;
+      }
+      
+      // Check for error
+      if (data?.error) {
+        setBatchStatus('error');
+        toast({
+          title: 'Batch transcription failed',
+          description: data.error,
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      // Unknown state, continue polling
+      setTimeout(() => pollBatchStatus(jobName, attempt + 1), POLL_INTERVAL);
+    } catch (err) {
+      // Network error, continue polling
+      setTimeout(() => pollBatchStatus(jobName, attempt + 1), POLL_INTERVAL);
     }
   };
 
@@ -269,6 +425,8 @@ const AppHome = () => {
       const text = (data?.text ?? data?.result?.text) ?? '';
       if (typeof text === 'string' && text.trim()) {
         setTranscriptText(text.trim());
+        setTranscriptSource('batch');
+        setBatchStatus('ready');
       }
     } catch (err) {
       setBatchStatusResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
@@ -308,6 +466,7 @@ const AppHome = () => {
 
     setIsStartingBatch(true);
     setStartBatchResult(null);
+    setBatchStatus('starting');
 
     try {
       const response = await fetch(
@@ -324,16 +483,18 @@ const AppHome = () => {
       const data = await response.json();
       setStartBatchResult(JSON.stringify(data, null, 2));
       
-      // On success, auto-fill jobName and trigger batch status check
+      // On success, auto-fill jobName and start polling
       if (data.ok && data.jobName) {
         setJobName(data.jobName);
-        // Wait a moment then trigger the batch status check
-        setTimeout(() => {
-          handleTestBatchStatus(data.jobName);
-        }, 500);
+        setBatchStatus('transcribing');
+        // Start polling for batch status
+        pollBatchStatus(data.jobName);
+      } else {
+        setBatchStatus('error');
       }
     } catch (err) {
       setStartBatchResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
+      setBatchStatus('error');
     } finally {
       setIsStartingBatch(false);
     }
@@ -487,6 +648,10 @@ const AppHome = () => {
       patientGender: '' 
     });
     
+    // Reset batch and transcript state
+    setTranscriptSource(null);
+    setBatchStatus('idle');
+    
     // Close dialog
     setShowEndEncounterDialog(false);
     
@@ -595,6 +760,8 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
     setBatchStatusResult(null);
     setStartBatchResult(null);
     setAuthCheckResult(null);
+    setTranscriptSource(null);
+    setBatchStatus('idle');
     
     // Clear encounter-scoped patient fields from preferences (keep physician-scoped)
     setPreferences({ 
@@ -1042,14 +1209,23 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
           </CardContent>
         </Card>
 
-        {/* Controls */}
+        {/* Controls - Batch section collapsed by default, shown as fallback */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Batch Transcription Controls</CardTitle>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg">Batch Transcription Controls</CardTitle>
+              <span className="text-xs text-muted-foreground">
+                {batchStatus === 'ready' ? '✓ Batch ready' : 'Manual fallback'}
+              </span>
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Batch transcription starts automatically when you stop recording. Use these controls only if auto-batch failed or you need to retry.
+            </p>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button onClick={handleTestAuth} disabled={isTestingAuth}>
+              <Button onClick={handleTestAuth} disabled={isTestingAuth} variant="outline" size="sm">
                 {isTestingAuth ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
@@ -1060,16 +1236,17 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
               
               <Button 
                 onClick={handleStartBatchLatest} 
-                disabled={isStartingBatch || !preferences.patientName.trim() || !preferences.patientGender} 
-                variant="secondary"
-                title={(!preferences.patientName.trim() || !preferences.patientGender) ? 'Patient Name and Gender required' : ''}
+                disabled={isStartingBatch || batchStatus === 'transcribing' || !preferences.patientName.trim() || !preferences.patientGender} 
+                variant="outline"
+                size="sm"
+                title={(!preferences.patientName.trim() || !preferences.patientGender) ? 'Patient Name and Gender required' : 'Manually start batch transcription'}
               >
-                {isStartingBatch ? (
+                {isStartingBatch || batchStatus === 'transcribing' ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
-                  <Play className="h-4 w-4 mr-2" />
+                  <RefreshCw className="h-4 w-4 mr-2" />
                 )}
-                Start Batch (Latest Audio)
+                {batchStatus === 'error' ? 'Retry Batch' : 'Start Batch (Manual)'}
               </Button>
             </div>
 
@@ -1268,10 +1445,45 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </div>
 
             <div className="space-y-2">
+              {/* Batch Status Indicator */}
+              {batchStatus !== 'idle' && batchStatus !== 'ready' && (
+                <div className={`flex items-center gap-2 text-sm p-2 rounded-md ${
+                  batchStatus === 'starting' || batchStatus === 'transcribing' 
+                    ? 'bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400' 
+                    : 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400'
+                }`}>
+                  {batchStatus === 'starting' && (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Starting batch transcription...</span>
+                    </>
+                  )}
+                  {batchStatus === 'transcribing' && (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Transcribing audio (this may take a minute)...</span>
+                    </>
+                  )}
+                  {batchStatus === 'error' && (
+                    <>
+                      <AlertTriangle className="h-4 w-4" />
+                      <span>Batch transcription failed. Use "Start Batch" to retry.</span>
+                    </>
+                  )}
+                </div>
+              )}
+              
               {docSession.transcriptText && (
                 <div className="text-xs text-muted-foreground flex items-center justify-between">
-                  <span>
-                    Using transcript from: <strong>{liveScribe.status !== 'idle' || liveScribe.transcript ? 'Live' : 'Batch'}</strong>
+                  <span className="flex items-center gap-2">
+                    Transcript source: 
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                      transcriptSource === 'batch' 
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                    }`}>
+                      {transcriptSource === 'batch' ? 'Batch (final)' : 'Live (draft)'}
+                    </span>
                   </span>
                   <span>{docSession.transcriptText.length} chars</span>
                 </div>
