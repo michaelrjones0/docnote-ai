@@ -48,8 +48,8 @@ async function createPresignedUrl(
   sessionToken?: string
 ): Promise<string> {
   const service = 'transcribe';
-  const host = `transcribestreaming.${region}.amazonaws.com`;
-  const endpoint = `wss://${host}:8443/medical-stream-transcription-websocket`;
+  const hostWithPort = `transcribestreaming.${region}.amazonaws.com:8443`;
+  const endpoint = `wss://${hostWithPort}/medical-stream-transcription-websocket`;
   
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
@@ -94,7 +94,7 @@ async function createPresignedUrl(
     .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(allParams[k])}`)
     .join('&');
   
-  const canonicalHeaders = `host:${host}\n`;
+  const canonicalHeaders = `host:${hostWithPort}\n`;
   const signedHeaders = 'host';
   const payloadHash = await sha256('');
   
