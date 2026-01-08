@@ -186,16 +186,20 @@ const AppHome = () => {
       setTranscriptSource('live');
     }
     
-    // Auto-start batch transcription for Running Summary + Final mode (B)
-    // Also start batch if we have recorded audio to get high-fidelity final transcript
-    if (docSession.liveDraftMode === 'B' || liveScribe.getEstimatedAudioBytes() > 20000) {
-      // Auto-start batch
-      await handleAutoBatchStart();
-    } else if (finalTranscript?.trim()) {
-      // For Final Note Only mode (A) without batch, auto-generate from live transcript
-      setTimeout(() => {
-        handleGenerateSoap();
-      }, 100);
+    // Start batch transcription in background (non-blocking) for quality upgrade
+    // User can immediately use live transcript to generate SOAP
+    const audioBytes = liveScribe.getEstimatedAudioBytes();
+    if (audioBytes > 20000) {
+      // Fire and forget - batch runs in background, doesn't block user
+      handleAutoBatchStart();
+    }
+    
+    // Show toast that transcript is ready for note generation
+    if (finalTranscript?.trim()) {
+      toast({
+        title: 'Recording complete',
+        description: 'Transcript ready. You can generate your note now.',
+      });
     }
   };
 
