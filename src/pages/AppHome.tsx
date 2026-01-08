@@ -199,7 +199,23 @@ const AppHome = () => {
     }
   };
 
+  // Helper to convert Blob to base64
+  const blobToBase64 = async (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        // Remove data URL prefix (e.g., "data:audio/wav;base64,")
+        const base64 = dataUrl.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
   // Auto-start batch transcription (called when recording stops)
+  // Uses deterministic WAV blob from this recording, not "latest audio" guesswork
   const handleAutoBatchStart = async () => {
     if (!session?.access_token) {
       toast({
@@ -210,10 +226,20 @@ const AppHome = () => {
       return;
     }
 
-    const estimatedBytes = liveScribe.getEstimatedAudioBytes();
-    const MIN_AUDIO_BYTES = 20_000;
+    // Get the WAV blob from the recording
+    const wavBlob = liveScribe.getFullAudioBlob();
+    
+    if (!wavBlob) {
+      toast({
+        title: 'No audio recorded',
+        description: 'Recording produced no audio data.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
-    if (estimatedBytes < MIN_AUDIO_BYTES) {
+    const MIN_AUDIO_BYTES = 20_000;
+    if (wavBlob.size < MIN_AUDIO_BYTES) {
       // Not enough audio for batch, just use live transcript
       if (docSession.transcriptText?.trim()) {
         toast({
@@ -228,14 +254,24 @@ const AppHome = () => {
     setIsStartingBatch(true);
 
     try {
+      // Convert WAV blob to base64
+      const audioBase64 = await blobToBase64(wavBlob);
+      
+      // PHI-safe logging
+      console.log('[AutoBatch] Starting with audio size:', wavBlob.size, 'bytes');
+
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-latest`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-audio`,
         {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            audioBase64,
+            mimeType: 'audio/wav',
+          }),
         }
       );
 
@@ -435,31 +471,41 @@ const AppHome = () => {
     }
   };
 
+  // Manual batch start (fallback/retry) - also uses deterministic WAV blob
   const handleStartBatchLatest = async () => {
     if (!session?.access_token) {
       setStartBatchResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
       return;
     }
 
-    // Validate audio was recorded: estimate total bytes from chunks sent
-    const { chunksSent, bytesPerChunk } = liveScribe.debugInfo;
-    const estimatedBytes = chunksSent * (bytesPerChunk || 0);
+    // Get the WAV blob from the recording
+    const wavBlob = liveScribe.getFullAudioBlob();
+    
+    if (!wavBlob) {
+      toast({
+        title: 'No audio recorded',
+        description: 'No audio data available. Please record first.',
+        variant: 'destructive',
+      });
+      setStartBatchResult(JSON.stringify({ ok: false, error: 'No audio data available' }, null, 2));
+      return;
+    }
+
     const MIN_AUDIO_BYTES = 20_000; // 20 KB minimum
 
     // PHI-safe debug log: only sizes and format
-    console.log('[StartBatch] audioSizeBytes:', estimatedBytes, 'chunksSent:', chunksSent, 'bytesPerChunk:', bytesPerChunk);
+    console.log('[StartBatch] audioSizeBytes:', wavBlob.size);
 
-    if (estimatedBytes < MIN_AUDIO_BYTES) {
+    if (wavBlob.size < MIN_AUDIO_BYTES) {
       toast({
         title: 'Insufficient audio',
-        description: `Recorded audio is too small (${estimatedBytes} bytes). Please record at least a few seconds of audio before starting batch transcription.`,
+        description: `Recorded audio is too small (${wavBlob.size} bytes). Please record at least a few seconds of audio before starting batch transcription.`,
         variant: 'destructive',
       });
       setStartBatchResult(JSON.stringify({ 
         ok: false, 
-        error: `Insufficient audio: ${estimatedBytes} bytes < ${MIN_AUDIO_BYTES} bytes minimum`,
-        audioSizeBytes: estimatedBytes,
-        chunksSent,
+        error: `Insufficient audio: ${wavBlob.size} bytes < ${MIN_AUDIO_BYTES} bytes minimum`,
+        audioSizeBytes: wavBlob.size,
       }, null, 2));
       return;
     }
@@ -469,14 +515,21 @@ const AppHome = () => {
     setBatchStatus('starting');
 
     try {
+      // Convert WAV blob to base64
+      const audioBase64 = await blobToBase64(wavBlob);
+
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-latest`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-audio`,
         {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            audioBase64,
+            mimeType: 'audio/wav',
+          }),
         }
       );
 
