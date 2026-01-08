@@ -312,18 +312,17 @@ const AppHome = () => {
     }
   };
 
-  // Poll for batch transcription status
-  const pollBatchStatus = async (jobName: string, attempt = 0) => {
-    const MAX_ATTEMPTS = 60; // ~5 minutes with 5s interval
-    const POLL_INTERVAL = 5000;
+  // Poll for batch transcription status with exponential backoff
+  const pollBatchStatus = async (jobName: string, attempt = 0, startTime = Date.now()) => {
+    // Exponential backoff: 1s → 2s → 4s → 8s → max 15s
+    const getInterval = (n: number) => Math.min(1000 * Math.pow(2, n), 15000);
+    const MAX_POLL_DURATION_MS = 10 * 60 * 1000; // 10 minutes max
+    const elapsed = Date.now() - startTime;
 
-    if (attempt >= MAX_ATTEMPTS) {
-      setBatchStatus('error');
-      toast({
-        title: 'Batch transcription timeout',
-        description: 'Please try again with "Start Batch" button.',
-        variant: 'destructive',
-      });
+    if (elapsed >= MAX_POLL_DURATION_MS) {
+      // Don't error out, just stop polling - batch continues in background
+      setBatchStatus('transcribing'); // Keep as "still processing" 
+      console.log('[BatchPoll] Stopped after 10min. Batch may still complete.');
       return;
     }
 
@@ -345,40 +344,72 @@ const AppHome = () => {
       // Check if transcript is ready
       const text = (data?.text ?? data?.result?.text) ?? '';
       if (typeof text === 'string' && text.trim()) {
-        setTranscriptText(text.trim());
-        setTranscriptSource('batch');
-        setBatchStatus('ready');
+        // Show "refined transcript available" - don't auto-replace if user already has live
+        if (transcriptSource === 'live' && docSession.transcriptText?.trim()) {
+          // User already has live transcript - offer upgrade
+          setBatchStatus('ready');
+          toast({
+            title: 'Refined transcript ready',
+            description: 'Higher-quality batch transcript available. Click "Use Refined" to upgrade.',
+          });
+          // Store batch text for later use
+          batchTranscriptRef.current = text.trim();
+        } else {
+          // No live transcript yet, use batch directly
+          setTranscriptText(text.trim());
+          setTranscriptSource('batch');
+          setBatchStatus('ready');
+          toast({
+            title: 'Transcript ready',
+            description: 'Final transcript available.',
+          });
+        }
         
-        toast({
-          title: 'Transcript ready',
-          description: 'Final transcript available. Ready to generate SOAP.',
-        });
+        // Log timing metadata if available
+        if (data?.meta?.timings) {
+          console.log('[BatchPoll] Completed with timings:', data.meta.timings);
+        }
         return;
       }
       
       // Check for NOT_FOUND or still processing
       if (data?.status === 'NOT_FOUND' || data?.status === 'IN_PROGRESS') {
-        // Continue polling
-        setTimeout(() => pollBatchStatus(jobName, attempt + 1), POLL_INTERVAL);
+        const interval = getInterval(attempt);
+        setTimeout(() => pollBatchStatus(jobName, attempt + 1, startTime), interval);
         return;
       }
       
-      // Check for error
-      if (data?.error) {
+      // Check for error/failure
+      if (data?.status === 'FAILED' || data?.error) {
         setBatchStatus('error');
-        toast({
-          title: 'Batch transcription failed',
-          description: data.error,
-          variant: 'destructive',
-        });
+        console.error('[BatchPoll] Failed:', data.error || data.failureReason);
+        // Don't toast - batch is background refinement, not blocking
         return;
       }
       
       // Unknown state, continue polling
-      setTimeout(() => pollBatchStatus(jobName, attempt + 1), POLL_INTERVAL);
+      const interval = getInterval(attempt);
+      setTimeout(() => pollBatchStatus(jobName, attempt + 1, startTime), interval);
     } catch (err) {
-      // Network error, continue polling
-      setTimeout(() => pollBatchStatus(jobName, attempt + 1), POLL_INTERVAL);
+      // Network error, continue polling with backoff
+      const interval = getInterval(attempt);
+      setTimeout(() => pollBatchStatus(jobName, attempt + 1, startTime), interval);
+    }
+  };
+  
+  // Ref to store batch transcript for "Use Refined" flow
+  const batchTranscriptRef = useRef<string | null>(null);
+  
+  // Apply refined batch transcript
+  const handleUseRefinedTranscript = () => {
+    if (batchTranscriptRef.current) {
+      setTranscriptText(batchTranscriptRef.current);
+      setTranscriptSource('batch');
+      batchTranscriptRef.current = null;
+      toast({
+        title: 'Transcript upgraded',
+        description: 'Now using refined batch transcript.',
+      });
     }
   };
 
@@ -1541,6 +1572,25 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                     }`}>
                       {transcriptSource === 'batch' ? 'Batch (final)' : 'Live (draft)'}
                     </span>
+                    {/* Show upgrade button when batch is ready but still on live */}
+                    {batchStatus === 'ready' && transcriptSource === 'live' && batchTranscriptRef.current && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleUseRefinedTranscript}
+                        className="h-6 text-xs px-2 py-0 ml-2"
+                      >
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                        Use Refined
+                      </Button>
+                    )}
+                    {/* Show processing indicator */}
+                    {batchStatus === 'transcribing' && (
+                      <span className="flex items-center gap-1 ml-2 text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Refining...
+                      </span>
+                    )}
                   </span>
                   <span>{docSession.transcriptText.length} chars</span>
                 </div>

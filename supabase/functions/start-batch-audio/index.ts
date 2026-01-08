@@ -238,6 +238,7 @@ async function startMedicalTranscriptionJob(
 // =====================================================
 
 serve(async (req) => {
+  const requestStartTime = Date.now();
   const origin = req.headers.get("origin");
   const { headers: corsHeaders, isAllowed } = getCorsHeaders(origin);
 
@@ -251,6 +252,9 @@ serve(async (req) => {
     return errorResponse("Origin not allowed", 403, corsHeaders);
   }
 
+  // Timing instrumentation
+  const timings: Record<string, number> = {};
+
   try {
     // Authenticate user
     const authResult = await requireUser(req, corsHeaders);
@@ -260,6 +264,7 @@ serve(async (req) => {
     const userId = authResult.userId;
 
     // Parse request body
+    const decodeStartTime = Date.now();
     const body = await req.json();
     const { audioBase64, mimeType } = body;
 
@@ -273,6 +278,7 @@ serve(async (req) => {
 
     // Decode base64 to binary
     const audioBytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+    timings.decodeMs = Date.now() - decodeStartTime;
     
     // PHI-safe logging: only sizes, no content
     console.log("[start-batch-audio] Received audio:", {
@@ -298,6 +304,10 @@ serve(async (req) => {
       return errorResponse("Invalid WAV file format", 400, corsHeaders);
     }
 
+    // Estimate audio duration from WAV header (bytes / (sample_rate * channels * bytes_per_sample))
+    // Assumes 16kHz, mono, 16-bit = 32000 bytes/sec
+    const estimatedDurationMs = Math.round((audioBytes.byteLength - 44) / 32 * 1000 / 1000);
+
     // Get AWS config
     const awsConfig = getAwsConfig();
 
@@ -308,6 +318,7 @@ serve(async (req) => {
     const outputKey = `${awsConfig.s3Prefix}batch-output/${jobName}.json`;
 
     // Upload audio to S3
+    const uploadStartTime = Date.now();
     await uploadToS3(
       awsConfig.s3Bucket,
       s3Key,
@@ -315,34 +326,45 @@ serve(async (req) => {
       "audio/wav",
       awsConfig
     );
+    timings.uploadMs = Date.now() - uploadStartTime;
 
     console.log("[start-batch-audio] Uploaded to S3:", {
       bucket: awsConfig.s3Bucket,
       key: s3Key,
       bytes: audioBytes.byteLength,
+      uploadMs: timings.uploadMs,
     });
 
     // Start transcription job
+    const startJobTime = Date.now();
     const mediaUri = `s3://${awsConfig.s3Bucket}/${s3Key}`;
-    const result = await startMedicalTranscriptionJob(
+    await startMedicalTranscriptionJob(
       jobName,
       mediaUri,
       awsConfig.s3Bucket,
       outputKey,
       awsConfig
     );
+    timings.startJobMs = Date.now() - startJobTime;
+    timings.totalMs = Date.now() - requestStartTime;
 
     console.log("[start-batch-audio] Started transcription job:", {
       jobName,
-      mediaUri: `s3://${awsConfig.s3Bucket}/${s3Key}`,
+      timings,
     });
 
     return jsonResponse({
       ok: true,
       jobName,
-      audioBytes: audioBytes.byteLength,
+      meta: {
+        timings,
+        audioBytes: audioBytes.byteLength,
+        estimatedDurationMs,
+        awsRegion: awsConfig.region,
+      }
     }, corsHeaders);
   } catch (err) {
+    timings.totalMs = Date.now() - requestStartTime;
     console.error("[start-batch-audio] Error:", err);
     return errorResponse(
       err instanceof Error ? err.message : "Unknown error",
