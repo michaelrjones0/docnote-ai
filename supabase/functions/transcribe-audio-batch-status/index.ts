@@ -288,9 +288,10 @@ serve(async (req) => {
 
     if (jobStatus.status === 'COMPLETED') {
       // Fetch transcript from S3 using SigV4-signed GetObject request
-      const s3Bucket = 'apollohealth-transcription-us-west-2';
-      const s3Region = 'us-west-2';
-      const s3Key = `transcribe/batch-output/${jobName}.json`;
+      // Use env-driven config - never hardcode bucket/region
+      const s3Bucket = awsConfig.s3Bucket;
+      const s3Region = awsConfig.region;
+      const s3Key = `${awsConfig.s3Prefix}batch-output/${jobName}.json`;
       const s3Url = `https://${s3Bucket}.s3.${s3Region}.amazonaws.com/${s3Key}`;
 
       const s3StartTime = Date.now();

@@ -24,6 +24,7 @@ export type StreamingDictationStatus = 'idle' | 'connecting' | 'listening' | 'st
 const TARGET_SAMPLE_RATE = 16000;
 const FRAME_DURATION_MS = 100; // Send audio frames every 100ms
 const TAIL_DEDUP_CHARS = 80;
+const CONNECT_TIMEOUT_MS = 8000; // Hard timeout for WebSocket connection
 
 interface UseStreamingDictationOptions {
   onError?: (error: string) => void;
@@ -82,6 +83,7 @@ export function useStreamingDictation({
   const pcmBufferRef = useRef<Float32Array[]>([]);
   const sourceSampleRateRef = useRef<number>(48000);
   const frameTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   // State refs
   const isActiveRef = useRef(false);
@@ -120,15 +122,21 @@ export function useStreamingDictation({
   const cleanup = useCallback(() => {
     isActiveRef.current = false;
     
+    // Clear connect timeout
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+    
     if (frameTimerRef.current) {
       clearInterval(frameTimerRef.current);
       frameTimerRef.current = null;
     }
     
     if (wsRef.current) {
-      if (wsRef.current.readyState === WebSocket.OPEN) {
+      try {
         wsRef.current.close(1000, 'Session ended');
-      }
+      } catch {}
       wsRef.current = null;
     }
     
@@ -352,12 +360,31 @@ export function useStreamingDictation({
         }
       };
 
-      // Connect WebSocket
+      // Connect WebSocket with hard timeout
       const ws = new WebSocket(urlData.url);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
+      // Set up connect timeout - ensures stop always works even if socket never opens
+      connectTimeoutRef.current = setTimeout(() => {
+        if (DEBUG_AUDIO) {
+          console.error('[StreamingDictation] Connect timeout after', CONNECT_TIMEOUT_MS, 'ms');
+        }
+        try { ws.close(); } catch {}
+        wsRef.current = null;
+        cleanup();
+        setStatus('idle');
+        setError('Connection timed out');
+        onError?.('Streaming failed to connect. Try again or use batch mode.');
+      }, CONNECT_TIMEOUT_MS);
+
       ws.onopen = () => {
+        // Clear connect timeout on successful connection
+        if (connectTimeoutRef.current) {
+          clearTimeout(connectTimeoutRef.current);
+          connectTimeoutRef.current = null;
+        }
+        
         if (DEBUG_AUDIO) {
           console.log('[StreamingDictation] WebSocket connected');
         }
@@ -393,12 +420,23 @@ export function useStreamingDictation({
       };
 
       ws.onerror = () => {
+        // Clear connect timeout
+        if (connectTimeoutRef.current) {
+          clearTimeout(connectTimeoutRef.current);
+          connectTimeoutRef.current = null;
+        }
         safeErrorLog('[StreamingDictation] WebSocket error', new Error('WebSocket connection error'));
         setError('Connection error');
         onError?.('Connection error');
       };
 
       ws.onclose = (event) => {
+        // Clear connect timeout
+        if (connectTimeoutRef.current) {
+          clearTimeout(connectTimeoutRef.current);
+          connectTimeoutRef.current = null;
+        }
+        
         if (DEBUG_AUDIO) {
           console.log('[StreamingDictation] WebSocket closed', { code: event.code });
         }
@@ -420,12 +458,19 @@ export function useStreamingDictation({
     }
   }, [status, cleanup, setIsDictating, onError, getActiveField, sendAudioFrame, handleTranscriptMessage, onNoFieldFocused]);
 
-  // Stop streaming session
+  // Stop streaming session - always works even if connecting
   const stopRecording = useCallback(async () => {
-    if (!isActiveRef.current && status === 'idle') return;
+    // Allow stopping even during 'connecting' state
+    if (status === 'idle') return;
     
     setStatus('stopping');
     isActiveRef.current = false;
+    
+    // Clear any pending connect timeout
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
 
     if (DEBUG_AUDIO) {
       console.log('[StreamingDictation] stopRecording');
@@ -457,16 +502,13 @@ export function useStreamingDictation({
     safeLog('[StreamingDictation]', 'Recording stopped');
   }, [status, cleanup, sendAudioFrame]);
 
-  // Toggle function
+  // Toggle function - stop works in any non-idle state
   const toggle = useCallback(async () => {
-    if (isActiveRef.current || status === 'listening' || status === 'connecting' || status === 'stopping') {
+    if (status !== 'idle') {
       await stopRecording();
       return;
     }
-
-    if (status === 'idle') {
-      await startRecording();
-    }
+    await startRecording();
   }, [status, startRecording, stopRecording]);
 
   // Cleanup on unmount
