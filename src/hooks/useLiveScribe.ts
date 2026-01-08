@@ -115,6 +115,9 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   const isProcessingRef = useRef(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Store all recorded PCM data for batch processing
+  const allRecordedPcmRef = useRef<Int16Array[]>([]);
+  
   // Accumulated transcript for proper delta calculation
   const accumulatedTranscriptRef = useRef('');
   
@@ -340,6 +343,9 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       }
 
       safeLog(`[LiveScribe] Processing chunk ${currentIndex}, ${pcm16.length} samples (${(pcm16.length / TARGET_SAMPLE_RATE).toFixed(1)}s)`);
+      
+      // Store PCM data for batch processing
+      allRecordedPcmRef.current.push(pcm16);
 
       const result = await processAudioChunk(pcm16, currentIndex);
       
@@ -505,6 +511,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       setRunningSummary(null);
       chunkIndexRef.current = 0;
       pcmBufferRef.current = [];
+      allRecordedPcmRef.current = []; // Reset full recording buffer
       accumulatedTranscriptRef.current = '';
       lastSummaryTranscriptLengthRef.current = 0;
       currentRunningSummaryRef.current = null;
@@ -902,6 +909,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
       streamRef.current = null;
     }
     pcmBufferRef.current = [];
+    allRecordedPcmRef.current = [];
     chunkIndexRef.current = 0;
     isProcessingRef.current = false;
     accumulatedTranscriptRef.current = '';
@@ -929,6 +937,70 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     });
   }, [chunkIntervalMs]);
 
+  // Get full audio as WAV blob for batch transcription
+  const getFullAudioBlob = useCallback((): Blob | null => {
+    if (allRecordedPcmRef.current.length === 0) {
+      return null;
+    }
+    
+    // Merge all PCM chunks
+    const totalLength = allRecordedPcmRef.current.reduce((acc, chunk) => acc + chunk.length, 0);
+    const fullPcm = new Int16Array(totalLength);
+    let offset = 0;
+    for (const chunk of allRecordedPcmRef.current) {
+      fullPcm.set(chunk, offset);
+      offset += chunk.length;
+    }
+    
+    // Create WAV file
+    const wavBuffer = createWavBuffer(fullPcm, TARGET_SAMPLE_RATE);
+    return new Blob([wavBuffer], { type: 'audio/wav' });
+  }, []);
+
+  // Helper to create WAV buffer from PCM16 data
+  const createWavBuffer = (pcm16: Int16Array, sampleRate: number): ArrayBuffer => {
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+    const blockAlign = numChannels * (bitsPerSample / 8);
+    const dataSize = pcm16.length * (bitsPerSample / 8);
+    const headerSize = 44;
+    const buffer = new ArrayBuffer(headerSize + dataSize);
+    const view = new DataView(buffer);
+    
+    // RIFF header
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // fmt chunk size
+    view.setUint16(20, 1, true); // audio format (PCM)
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+    
+    // Write PCM data
+    const pcmBytes = new Uint8Array(pcm16.buffer);
+    new Uint8Array(buffer, headerSize).set(pcmBytes);
+    
+    return buffer;
+  };
+
+  // Get estimated audio size in bytes
+  const getEstimatedAudioBytes = useCallback((): number => {
+    return allRecordedPcmRef.current.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+  }, []);
+
   return {
     status,
     transcript,
@@ -944,5 +1016,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
     stopRecording,
     reset,
     getEncounterSnapshot,
+    getFullAudioBlob,
+    getEstimatedAudioBytes,
   };
 }
