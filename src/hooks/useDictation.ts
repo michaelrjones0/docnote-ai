@@ -35,12 +35,19 @@ import { useDeepgramDictation } from './useDeepgramDictation';
 // Environment-driven flags
 const DICTATION_ENGINE = import.meta.env.VITE_DICTATION_ENGINE || 'batch';
 const STREAMING_ENABLED = import.meta.env.VITE_STREAMING_ENABLED === 'true';
+const DEEPGRAM_RELAY_URL = import.meta.env.VITE_DEEPGRAM_RELAY_URL || '';
 
-// Determine preferred mode: deepgram > streaming > batch
+// Determine preferred mode: deepgram (only if relay configured) > streaming > batch
 function getPreferredMode(): DictationMode {
-  if (DICTATION_ENGINE === 'deepgram') return 'deepgram';
+  // Deepgram only works if relay URL is configured - no relay = no Deepgram
+  if (DICTATION_ENGINE === 'deepgram' && DEEPGRAM_RELAY_URL) return 'deepgram';
   if (STREAMING_ENABLED) return 'streaming';
   return 'batch';
+}
+
+// Check if Deepgram was requested but relay not configured
+function isDeepgramRequestedButUnavailable(): boolean {
+  return DICTATION_ENGINE === 'deepgram' && !DEEPGRAM_RELAY_URL;
 }
 
 export type DictationStatus = 'idle' | 'connecting' | 'listening' | 'stopping' | 'transcribing';
@@ -68,11 +75,30 @@ const FALLBACK_TIMEOUT_MS = 5000;
 export function useDictation(options: UseDictationOptions = {}): UseDictationReturn {
   const { onError, onNoFieldFocused } = options;
 
-  const [fallbackMode, setFallbackMode] = useState<DictationMode | null>(null);
-  const [fallbackReason, setFallbackReason] = useState<string | undefined>(undefined);
+  const [fallbackMode, setFallbackMode] = useState<DictationMode | null>(() => {
+    // If Deepgram was requested but no relay URL, start in fallback mode immediately
+    if (isDeepgramRequestedButUnavailable()) {
+      return 'batch';
+    }
+    return null;
+  });
+  const [fallbackReason, setFallbackReason] = useState<string | undefined>(() => {
+    if (isDeepgramRequestedButUnavailable()) {
+      return 'Deepgram unavailable — using batch dictation';
+    }
+    return undefined;
+  });
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptedModeRef = useRef<DictationMode | null>(null);
   const hasNotifiedFallbackRef = useRef(false);
+
+  // Show one-time toast if Deepgram requested but unavailable (on first toggle)
+  const notifyDeepgramUnavailableOnce = useCallback(() => {
+    if (isDeepgramRequestedButUnavailable() && !hasNotifiedFallbackRef.current) {
+      hasNotifiedFallbackRef.current = true;
+      onError?.('Deepgram unavailable — using batch dictation');
+    }
+  }, [onError]);
 
   // Handler for streaming mode errors - triggers immediate fallback
   const handleStreamingError = useCallback((error: string) => {
@@ -216,9 +242,15 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRet
     }
 
     // Batch mode (default or fallback)
+    // Wrap toggle to notify user once if Deepgram was requested but unavailable
+    const wrappedToggle = async () => {
+      notifyDeepgramUnavailableOnce();
+      return batch.toggle();
+    };
+
     return {
       status: mapBatchStatus(batch.status),
-      toggle: batch.toggle,
+      toggle: wrappedToggle,
       stop: batch.stopRecording,
       error: batch.error,
       activeFieldId: batch.activeFieldId,
@@ -252,6 +284,7 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRet
     deepgram.streamHealth,
     mapBatchStatus,
     mapStreamingStatus,
+    notifyDeepgramUnavailableOnce,
   ]);
 
   return result;
