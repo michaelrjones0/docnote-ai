@@ -28,16 +28,16 @@ serve(async (req) => {
     });
   }
 
-  // Return clear error - Deepgram token endpoint is disabled
-  // Frontend should fall back to batch dictation
+  // Return 200 with disabled flag - prevents 5xx errors in logs
+  // Frontend checks ok:false and uses batch fallback
   return new Response(
     JSON.stringify({
       ok: false,
-      error: "Deepgram token endpoint unsupported; using relay",
-      fallback: "batch",
+      error: "Deepgram relay not configured",
+      disabled: true,
     }),
     { 
-      status: 503, // Service Unavailable - clear signal to fallback
+      status: 200, // OK status - no errors in logs
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
     }
   );
