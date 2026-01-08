@@ -9,6 +9,9 @@
  * - Text-based tail dedup (80 chars) prevents duplicates across finalized results
  * 
  * PHI-SAFE: No transcript content logged. Only timing/status diagnostics.
+ * 
+ * FEATURE FLAG: Set STREAMING_ENABLED = false to disable streaming entirely
+ * and fall back to batch-only mode until we have a reliable WS backend.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -19,16 +22,24 @@ import { encodeAudioEvent, decodeEventMessage, parseTranscriptEvent } from '@/li
 
 const DEBUG_AUDIO = true;
 
-export type StreamingDictationStatus = 'idle' | 'connecting' | 'listening' | 'stopping';
+// ============================================================================
+// FEATURE FLAG: Disable streaming until WS backend is stable
+// Set to true to enable AWS Transcribe Medical Streaming
+// Set to false to disable streaming and use batch-only (safe default)
+// ============================================================================
+const STREAMING_ENABLED = false;
+
+export type StreamingDictationStatus = 'idle' | 'connecting' | 'listening' | 'stopping' | 'disabled';
 
 const TARGET_SAMPLE_RATE = 16000;
 const FRAME_DURATION_MS = 100; // Send audio frames every 100ms
 const TAIL_DEDUP_CHARS = 80;
-const CONNECT_TIMEOUT_MS = 8000; // Hard timeout for WebSocket connection
+const CONNECT_TIMEOUT_MS = 5000; // Hard timeout for WebSocket connection (reduced from 8s)
 
 interface UseStreamingDictationOptions {
   onError?: (error: string) => void;
   onNoFieldFocused?: () => void;
+  onStreamingDisabled?: () => void; // Called when streaming is disabled, allows fallback to batch
 }
 
 // AudioWorklet processor code
@@ -63,12 +74,17 @@ registerProcessor('pcm-processor-stream', PCMProcessor);
 export function useStreamingDictation({
   onError,
   onNoFieldFocused,
+  onStreamingDisabled,
 }: UseStreamingDictationOptions = {}) {
   const { insertText, getActiveField, setIsDictating, activeFieldId } = useDictationContext();
   
-  const [status, setStatus] = useState<StreamingDictationStatus>('idle');
+  // If streaming is disabled, return disabled state immediately
+  const [status, setStatus] = useState<StreamingDictationStatus>(
+    STREAMING_ENABLED ? 'idle' : 'disabled'
+  );
   const [error, setError] = useState<string | null>(null);
   const [partialText, setPartialText] = useState<string>('');
+  const [streamHealth, setStreamHealth] = useState<'online' | 'offline' | 'connecting'>('offline');
 
   // Audio pipeline refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -295,9 +311,35 @@ export function useStreamingDictation({
     }
   }, [insertText, onError]);
 
+  // Close any existing WebSocket before starting new one (single WS guarantee)
+  const closeExistingWebSocket = useCallback(() => {
+    if (wsRef.current) {
+      try {
+        wsRef.current.close(1000, 'Replaced by new session');
+      } catch {}
+      wsRef.current = null;
+    }
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+  }, []);
+
   // Start streaming session
   const startRecording = useCallback(async () => {
+    // If streaming is disabled, notify caller to use batch fallback
+    if (!STREAMING_ENABLED || status === 'disabled') {
+      if (DEBUG_AUDIO) {
+        console.log('[StreamingDictation] Streaming disabled, use batch fallback');
+      }
+      onStreamingDisabled?.();
+      return;
+    }
+    
     if (status !== 'idle') return;
+
+    // Ensure only one WS at a time
+    closeExistingWebSocket();
 
     try {
       sessionIdRef.current++;
@@ -307,6 +349,7 @@ export function useStreamingDictation({
       setError(null);
       setPartialText('');
       setStatus('connecting');
+      setStreamHealth('connecting');
 
       if (DEBUG_AUDIO) {
         console.log('[StreamingDictation] startRecording', { sessionId: sessionIdRef.current });
@@ -374,8 +417,10 @@ export function useStreamingDictation({
         wsRef.current = null;
         cleanup();
         setStatus('idle');
+        setStreamHealth('offline');
         setError('Connection timed out');
-        onError?.('Streaming failed to connect. Try again or use batch mode.');
+        onError?.('Streaming failed to connect. Falling back to batch mode.');
+        onStreamingDisabled?.(); // Trigger batch fallback
       }, CONNECT_TIMEOUT_MS);
 
       ws.onopen = () => {
@@ -388,6 +433,8 @@ export function useStreamingDictation({
         if (DEBUG_AUDIO) {
           console.log('[StreamingDictation] WebSocket connected');
         }
+        
+        setStreamHealth('online');
         
         isActiveRef.current = true;
         setStatus('listening');
@@ -426,6 +473,7 @@ export function useStreamingDictation({
           connectTimeoutRef.current = null;
         }
         safeErrorLog('[StreamingDictation] WebSocket error', new Error('WebSocket connection error'));
+        setStreamHealth('offline');
         setError('Connection error');
         onError?.('Connection error');
       };
@@ -445,26 +493,29 @@ export function useStreamingDictation({
           // Unexpected close
           cleanup();
           setStatus('idle');
+          setStreamHealth('offline');
         }
       };
 
     } catch (err) {
       safeErrorLog('[StreamingDictation] Start error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to start dictation';
+      setStreamHealth('offline');
       setError(errorMessage);
       onError?.(errorMessage);
       cleanup();
       setStatus('idle');
     }
-  }, [status, cleanup, setIsDictating, onError, getActiveField, sendAudioFrame, handleTranscriptMessage, onNoFieldFocused]);
+  }, [status, cleanup, setIsDictating, onError, getActiveField, sendAudioFrame, handleTranscriptMessage, onNoFieldFocused, onStreamingDisabled, closeExistingWebSocket]);
 
-  // Stop streaming session - always works even if connecting
+  // Stop streaming session - ALWAYS works regardless of state (connecting/open/closing)
   const stopRecording = useCallback(async () => {
-    // Allow stopping even during 'connecting' state
-    if (status === 'idle') return;
+    // Allow stopping even during 'connecting' or 'disabled' state - ALWAYS works
+    if (status === 'idle' || status === 'disabled') return;
     
     setStatus('stopping');
     isActiveRef.current = false;
+    setStreamHealth('offline');
     
     // Clear any pending connect timeout
     if (connectTimeoutRef.current) {
@@ -502,16 +553,22 @@ export function useStreamingDictation({
     safeLog('[StreamingDictation]', 'Recording stopped');
   }, [status, cleanup, sendAudioFrame]);
 
-  // Toggle function - stop works in any non-idle state
+  // Toggle function - stop works in any non-idle state (including connecting)
   const toggle = useCallback(async () => {
+    // Disabled state: notify for batch fallback
+    if (!STREAMING_ENABLED || status === 'disabled') {
+      onStreamingDisabled?.();
+      return;
+    }
+    
     if (status !== 'idle') {
       await stopRecording();
       return;
     }
     await startRecording();
-  }, [status, startRecording, stopRecording]);
+  }, [status, startRecording, stopRecording, onStreamingDisabled]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount - NO auto-connect on mount
   useEffect(() => {
     return () => {
       isActiveRef.current = false;
@@ -534,12 +591,15 @@ export function useStreamingDictation({
     status,
     error,
     partialText,
+    streamHealth, // 'online' | 'offline' | 'connecting' - for small indicator
     isListening: status === 'listening',
     isConnecting: status === 'connecting',
     isStopping: status === 'stopping',
+    isDisabled: !STREAMING_ENABLED || status === 'disabled',
     toggle,
     startRecording,
     stopRecording,
     activeFieldId,
+    STREAMING_ENABLED, // Export flag for UI to check
   };
 }
