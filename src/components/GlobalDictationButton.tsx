@@ -2,14 +2,18 @@
  * GlobalDictationButton - Main mic toggle for global dictation.
  * 
  * Uses the unified useDictation hook which selects implementation based on
- * VITE_STREAMING_ENABLED env flag (defaults to batch mode).
+ * VITE_DICTATION_ENGINE env flag (deepgram > streaming > batch).
+ * 
+ * Shows current engine indicator and connection health.
+ * Automatic fallback to batch mode if Deepgram/streaming fails.
  */
 
-import { Mic, MicOff, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { Mic, MicOff, Loader2, Wifi, WifiOff, Radio, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useDictation } from '@/hooks/useDictation';
+import { useDictation, DictationMode } from '@/hooks/useDictation';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
 
 interface GlobalDictationButtonProps {
   className?: string;
@@ -25,6 +29,7 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
     mode,
     streamHealth,
     partialText,
+    fallbackReason,
   } = useDictation({
     onError: (error) => {
       toast({
@@ -90,23 +95,47 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
     );
   };
 
-  // Small streaming status indicator (only shown in streaming mode when active)
-  const getStreamingIndicator = () => {
-    if (mode !== 'streaming' || !isActive) return null;
-    
-    const statusClasses = {
-      connecting: 'text-yellow-600',
-      online: 'text-green-600',
-      offline: 'text-destructive',
+  // Engine indicator with icon
+  const getEngineIndicator = () => {
+    const engineLabels: Record<DictationMode, { label: string; icon: React.ReactNode }> = {
+      deepgram: { label: 'Deepgram', icon: <Radio className="h-3 w-3" /> },
+      streaming: { label: 'AWS Stream', icon: <Wifi className="h-3 w-3" /> },
+      batch: { label: 'Batch', icon: <Database className="h-3 w-3" /> },
     };
+
+    const engine = engineLabels[mode];
+    const isStreaming = mode === 'deepgram' || mode === 'streaming';
     
-    const StatusIcon = streamHealth === 'online' ? Wifi : WifiOff;
-    
+    // Color based on health for streaming modes
+    let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'secondary';
+    if (isActive && isStreaming) {
+      if (streamHealth === 'online') variant = 'default';
+      else if (streamHealth === 'connecting') variant = 'outline';
+      else variant = 'destructive';
+    }
+
     return (
-      <span className={cn('flex items-center gap-1 text-xs', statusClasses[streamHealth || 'offline'])}>
-        <StatusIcon className="h-3 w-3" />
-        {streamHealth}
-      </span>
+      <Badge 
+        variant={variant} 
+        className={cn(
+          'text-xs flex items-center gap-1 font-normal',
+          fallbackReason && 'border-yellow-500'
+        )}
+        title={fallbackReason || `Engine: ${engine.label}`}
+      >
+        {engine.icon}
+        {engine.label}
+        {isActive && isStreaming && streamHealth && (
+          <span className={cn(
+            'ml-1',
+            streamHealth === 'online' && 'text-green-400',
+            streamHealth === 'connecting' && 'text-yellow-400',
+            streamHealth === 'offline' && 'text-red-400'
+          )}>
+            •
+          </span>
+        )}
+      </Badge>
     );
   };
 
@@ -129,16 +158,16 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
         {getButtonContent()}
       </Button>
       
+      {/* Engine indicator */}
+      {getEngineIndicator()}
+      
       {/* Listening indicator */}
       {isActive && (
-        <span className="flex items-center gap-1 text-xs">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
           <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
           {activeFieldId ? 'Receiving...' : 'No field'}
         </span>
       )}
-      
-      {/* Streaming status indicator */}
-      {getStreamingIndicator()}
     </div>
   );
 }
