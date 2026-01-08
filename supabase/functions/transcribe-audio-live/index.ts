@@ -495,7 +495,7 @@ serve(async (req) => {
       );
     }
 
-    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex, mimeType: inputMimeType, debug = false } = requestBody;
+    const { audio, encoding, sampleRate = 16000, languageCode = 'en-US', chunkIndex, mimeType: inputMimeType } = requestBody;
     
     // Normalize base64 input: could be raw base64 or data URL
     const rawAudio = typeof audio === 'string' ? audio : '';
@@ -741,15 +741,14 @@ serve(async (req) => {
       textLen, 
       segmentsLen,
       chunkIndex,
-      debug,
     });
 
-    // PHI-SAFE: Only return text/segments content when debug=true (development)
-    // Production requests get empty content but full metadata
+    // Always return transcript content to authenticated client
+    // PHI safety is maintained by: 1) JWT auth required, 2) logs never include content
     return new Response(
       JSON.stringify({ 
-        text: debug ? transcriptText : '',
-        segments: debug ? segments : [],
+        text: transcriptText,
+        segments,
         chunkIndex,
         isPartial: false,
         meta: { 

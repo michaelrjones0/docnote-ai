@@ -343,30 +343,35 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
 
       const result = await processAudioChunk(pcm16, currentIndex);
       
-      if (result?.text) {
-        const newText = result.text.trim();
-        if (newText) {
-          accumulatedTranscriptRef.current = accumulatedTranscriptRef.current
-            ? `${accumulatedTranscriptRef.current} ${newText}`
-            : newText;
-          
-          const fullTranscript = accumulatedTranscriptRef.current;
-          
-          setSegments(prev => {
-            const newSegments = [...prev, ...(result.segments || [])];
-            return newSegments;
-          });
-          
-          setTranscript(fullTranscript);
-          
-          setDebugInfo(prev => ({
-            ...prev,
-            totalTranscriptLength: fullTranscript.length,
-          }));
-          
-          // Call the callback to update session.transcriptText
-          onTranscriptUpdate?.(fullTranscript, result.segments || []);
-        }
+      // Extract transcript text: prefer result.text, fallback to joining segments
+      let newText = '';
+      if (result?.text && result.text.trim()) {
+        newText = result.text.trim();
+      } else if (result?.segments && result.segments.length > 0) {
+        newText = result.segments.map(s => s.content).join(' ').trim();
+      }
+      
+      if (newText) {
+        accumulatedTranscriptRef.current = accumulatedTranscriptRef.current
+          ? `${accumulatedTranscriptRef.current} ${newText}`
+          : newText;
+        
+        const fullTranscript = accumulatedTranscriptRef.current;
+        
+        setSegments(prev => {
+          const newSegments = [...prev, ...(result?.segments || [])];
+          return newSegments;
+        });
+        
+        setTranscript(fullTranscript);
+        
+        setDebugInfo(prev => ({
+          ...prev,
+          totalTranscriptLength: fullTranscript.length,
+        }));
+        
+        // Call the callback to update session.transcriptText
+        onTranscriptUpdate?.(fullTranscript, result?.segments || []);
       }
       
       // Check for early failure: if first 3 chunks return no text, surface error
