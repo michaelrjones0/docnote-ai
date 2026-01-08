@@ -197,12 +197,27 @@ export function useStreamingDictation({
     
     const messageType = decoded.headers[':message-type'];
     const eventType = decoded.headers[':event-type'];
+    const exceptionType = decoded.headers[':exception-type'];
     
     if (messageType === 'exception') {
-      const errorMessage = new TextDecoder().decode(decoded.payload);
-      safeErrorLog('[StreamingDictation] AWS exception:', { eventType });
-      setError('Transcription error');
-      onError?.('Transcription error');
+      // Parse AWS exception payload for debugging (PHI-safe - only error codes)
+      try {
+        const payloadText = new TextDecoder().decode(decoded.payload);
+        const exceptionData = JSON.parse(payloadText);
+        const errorCode = exceptionData?.Code || exceptionData?.ErrorCode || exceptionType || 'Unknown';
+        const errorMsg = exceptionData?.Message || exceptionData?.message || 'Transcription error';
+        console.error('[StreamingDictation] AWS exception:', { 
+          errorCode, 
+          exceptionType,
+          message: errorMsg 
+        });
+        setError(`${errorCode}: ${errorMsg}`);
+        onError?.(`${errorCode}: ${errorMsg}`);
+      } catch {
+        console.error('[StreamingDictation] AWS exception (raw):', { exceptionType, eventType });
+        setError('Transcription error');
+        onError?.('Transcription error');
+      }
       return;
     }
     
