@@ -1,13 +1,13 @@
 /**
  * GlobalDictationButton - Main mic toggle for global dictation.
  * 
- * Uses batch transcription (useGlobalDictation) for reliable dictation.
- * Streaming is disabled by default until WS backend is stable.
+ * Uses the unified useDictation hook which selects implementation based on
+ * VITE_STREAMING_ENABLED env flag (defaults to batch mode).
  */
 
-import { Mic, MicOff, Loader2 } from 'lucide-react';
+import { Mic, MicOff, Loader2, Wifi, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useGlobalDictation } from '@/hooks/useGlobalDictation';
+import { useDictation } from '@/hooks/useDictation';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +22,10 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
     status, 
     toggle, 
     activeFieldId,
-  } = useGlobalDictation({
+    mode,
+    streamHealth,
+    partialText,
+  } = useDictation({
     onError: (error) => {
       toast({
         title: 'Dictation Error',
@@ -41,7 +44,9 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
 
   const isListening = status === 'listening';
   const isTranscribing = status === 'transcribing';
-  const isIdle = status === 'idle';
+  const isConnecting = status === 'connecting';
+  const isStopping = status === 'stopping';
+  const isActive = isListening || isTranscribing || isConnecting || isStopping;
 
   const getButtonContent = () => {
     if (isTranscribing) {
@@ -49,6 +54,22 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
         <>
           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
           Transcribing…
+        </>
+      );
+    }
+    if (isConnecting) {
+      return (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          Connecting…
+        </>
+      );
+    }
+    if (isStopping) {
+      return (
+        <>
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          Stopping…
         </>
       );
     }
@@ -69,13 +90,33 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
     );
   };
 
+  // Small streaming status indicator (only shown in streaming mode when active)
+  const getStreamingIndicator = () => {
+    if (mode !== 'streaming' || !isActive) return null;
+    
+    const statusClasses = {
+      connecting: 'text-yellow-600',
+      online: 'text-green-600',
+      offline: 'text-destructive',
+    };
+    
+    const StatusIcon = streamHealth === 'online' ? Wifi : WifiOff;
+    
+    return (
+      <span className={cn('flex items-center gap-1 text-xs', statusClasses[streamHealth || 'offline'])}>
+        <StatusIcon className="h-3 w-3" />
+        {streamHealth}
+      </span>
+    );
+  };
+
   return (
     <div className={cn('flex items-center gap-2', className)}>
       <Button
         type="button"
-        variant={isListening || isTranscribing ? 'destructive' : 'default'}
+        variant={isActive ? 'destructive' : 'default'}
         size="sm"
-        onClick={toggle}
+        onClick={() => toggle()}
         // Never disable - stop always works
         disabled={false}
         onMouseDown={(e) => e.preventDefault()}
@@ -89,12 +130,15 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
       </Button>
       
       {/* Listening indicator */}
-      {(isListening || isTranscribing) && (
+      {isActive && (
         <span className="flex items-center gap-1 text-xs">
           <span className="w-2 h-2 rounded-full bg-destructive animate-pulse" />
           {activeFieldId ? 'Receiving...' : 'No field'}
         </span>
       )}
+      
+      {/* Streaming status indicator */}
+      {getStreamingIndicator()}
     </div>
   );
 }

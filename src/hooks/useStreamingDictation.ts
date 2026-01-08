@@ -23,11 +23,10 @@ import { encodeAudioEvent, decodeEventMessage, parseTranscriptEvent } from '@/li
 const DEBUG_AUDIO = true;
 
 // ============================================================================
-// FEATURE FLAG: Disable streaming until WS backend is stable
-// Set to true to enable AWS Transcribe Medical Streaming
-// Set to false to disable streaming and use batch-only (safe default)
+// FEATURE FLAG: Environment-driven (defaults to false for batch-only safe mode)
+// Set VITE_STREAMING_ENABLED=true to enable AWS Transcribe Medical Streaming
 // ============================================================================
-const STREAMING_ENABLED = false;
+const STREAMING_ENABLED = import.meta.env.VITE_STREAMING_ENABLED === 'true';
 
 export type StreamingDictationStatus = 'idle' | 'connecting' | 'listening' | 'stopping' | 'disabled';
 
