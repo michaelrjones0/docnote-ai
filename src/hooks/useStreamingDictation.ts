@@ -200,19 +200,27 @@ export function useStreamingDictation({
     const exceptionType = decoded.headers[':exception-type'];
     
     if (messageType === 'exception') {
-      // Parse AWS exception payload for debugging (PHI-safe - only error codes)
+      // Parse AWS exception payload for debugging (PHI-safe - only error codes, no URLs/creds)
       try {
         const payloadText = new TextDecoder().decode(decoded.payload);
         const exceptionData = JSON.parse(payloadText);
         const errorCode = exceptionData?.Code || exceptionData?.ErrorCode || exceptionType || 'Unknown';
-        const errorMsg = exceptionData?.Message || exceptionData?.message || 'Transcription error';
+        // Extract only the error type, mask any URLs or credentials
+        const rawMsg = exceptionData?.Message || exceptionData?.message || '';
+        const safeMsg = rawMsg.replace(/wss:\/\/[^\s]+/g, '[MASKED_URL]')
+                              .replace(/X-Amz-[A-Za-z-]+=[^\s&]+/g, '[MASKED]')
+                              .replace(/AKIA[A-Z0-9]{16}/g, '[MASKED_KEY]');
         console.error('[StreamingDictation] AWS exception:', { 
           errorCode, 
           exceptionType,
-          message: errorMsg 
+          message: safeMsg 
         });
-        setError(`${errorCode}: ${errorMsg}`);
-        onError?.(`${errorCode}: ${errorMsg}`);
+        // Show user-friendly error without sensitive details
+        const userError = errorCode === 'InvalidSignatureException' 
+          ? 'Authentication failed - please try again'
+          : `Transcription error: ${errorCode}`;
+        setError(userError);
+        onError?.(userError);
       } catch {
         console.error('[StreamingDictation] AWS exception (raw):', { exceptionType, eventType });
         setError('Transcription error');
