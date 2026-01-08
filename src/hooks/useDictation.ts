@@ -72,16 +72,34 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRet
   const [fallbackReason, setFallbackReason] = useState<string | undefined>(undefined);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptedModeRef = useRef<DictationMode | null>(null);
+  const hasNotifiedFallbackRef = useRef(false);
 
-  // Handler for streaming mode errors - triggers fallback
+  // Handler for streaming mode errors - triggers immediate fallback
   const handleStreamingError = useCallback((error: string) => {
     const preferredMode = getPreferredMode();
+    
+    // Check if this is an explicit "disabled" signal from the edge function
+    const isDisabledError = error.includes('DEEPGRAM_DISABLED') || 
+                            error.includes('unsupported') ||
+                            error.includes('unavailable');
     
     // Only fallback if we haven't already and we're in a streaming mode
     if (!fallbackMode && (preferredMode === 'deepgram' || preferredMode === 'streaming')) {
       console.log('[useDictation] Streaming failed, falling back to batch:', error);
       setFallbackMode('batch');
-      setFallbackReason(`Fallback: ${error}`);
+      
+      // Friendly reason for display
+      const friendlyReason = isDisabledError 
+        ? 'Deepgram unavailable — using batch dictation'
+        : `Fallback: ${error}`;
+      setFallbackReason(friendlyReason);
+      
+      // Only call onError once to show toast
+      if (!hasNotifiedFallbackRef.current) {
+        hasNotifiedFallbackRef.current = true;
+        onError?.(friendlyReason);
+      }
+      return; // Don't call onError again below
     }
     
     onError?.(error);
