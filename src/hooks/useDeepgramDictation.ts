@@ -1,6 +1,17 @@
 /**
  * useDeepgramDictation - Real-time streaming transcription via Deepgram
  * 
+ * PURPOSE: Field dictation only (scratchpad, SOAP fields, form inputs).
+ * This hook is for fast real-time voice-to-text insertion, NOT for encounter
+ * recording/transcription (which uses AWS via useLiveScribe).
+ * 
+ * TRANSCRIPT QUALITY HIERARCHY:
+ * - Deepgram streaming = draft quality (fast, for field insertion)
+ * - AWS Transcribe Medical = final quality (for clinical notes)
+ * 
+ * SECURITY: DEEPGRAM_API_KEY never reaches browser.
+ * Edge function provides short-lived tokens (60s TTL) for direct WebSocket connection.
+ * 
  * Architecture:
  * - Requests a short-lived token from edge function (DEEPGRAM_API_KEY never exposed)
  * - Browser connects directly to Deepgram WebSocket using temporary token

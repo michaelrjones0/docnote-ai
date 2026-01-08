@@ -1,12 +1,23 @@
 /**
- * useDictation - Unified dictation hook that selects implementation based on env flags.
+ * useDictation - Unified dictation hook for field insertion (scratchpad, SOAP fields, forms).
+ * 
+ * PURPOSE: Real-time voice-to-text for individual text fields.
+ * NOT for encounter recording (which uses useLiveScribe → AWS).
+ * 
+ * TRANSCRIPTION ENGINE SEPARATION:
+ * - Deepgram (VITE_DICTATION_ENGINE='deepgram'): Fast streaming for field dictation
+ * - AWS Transcribe Medical (useLiveScribe): High-fidelity batch for clinical notes
+ * 
+ * TRANSCRIPT SOURCE RULES:
+ * - Deepgram output = draft quality (instant, for typing assistance)
+ * - AWS batch output = refined final (for note generation)
+ * - Never block UX on AWS - user can generate immediately from live/Deepgram
+ * - "Refined transcript available → Use / Regenerate" when AWS batch completes
  * 
  * Priority:
  * 1. VITE_DICTATION_ENGINE='deepgram' → uses Deepgram streaming (fastest, preferred)
  * 2. VITE_STREAMING_ENABLED=true → uses AWS Transcribe streaming (legacy)
  * 3. otherwise → uses batch (reliable fallback)
- * 
- * All implementations expose the same interface for the UI.
  * 
  * SECURITY: Deepgram API key never reaches browser. Edge function provides
  * short-lived tokens that browser uses to connect directly to Deepgram.
