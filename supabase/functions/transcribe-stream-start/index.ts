@@ -44,7 +44,8 @@ async function createPresignedUrl(
   region: string,
   languageCode: string,
   sampleRate: number,
-  specialty: string = 'PRIMARYCARE'
+  specialty: string = 'PRIMARYCARE',
+  sessionToken?: string
 ): Promise<string> {
   const service = 'transcribe';
   const host = `transcribestreaming.${region}.amazonaws.com`;
@@ -58,11 +59,15 @@ async function createPresignedUrl(
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const credential = `${accessKeyId}/${credentialScope}`;
   
+  // Generate unique session ID (required by AWS)
+  const sessionId = crypto.randomUUID();
+  
   // Query parameters for AWS Transcribe Medical Streaming
   const queryParams: Record<string, string> = {
     'language-code': languageCode,
     'media-encoding': 'pcm',
     'sample-rate': sampleRate.toString(),
+    'session-id': sessionId,
     'specialty': specialty,
     'type': 'DICTATION',
     'show-speaker-label': 'false',
@@ -77,6 +82,11 @@ async function createPresignedUrl(
     'X-Amz-Expires': '300',
     'X-Amz-SignedHeaders': 'host',
   };
+  
+  // Add security token if using temporary credentials
+  if (sessionToken) {
+    signatureParams['X-Amz-Security-Token'] = sessionToken;
+  }
   
   const allParams = { ...queryParams, ...signatureParams };
   const sortedKeys = Object.keys(allParams).sort();
@@ -166,13 +176,17 @@ serve(async (req) => {
       );
     }
 
+    // Check for session token (temporary credentials)
+    const sessionToken = Deno.env.get('AWS_SESSION_TOKEN');
+
     const presignedUrl = await createPresignedUrl(
       awsConfig.accessKeyId,
       awsConfig.secretAccessKey,
       awsConfig.region,
       languageCode,
       sampleRate,
-      specialty
+      specialty,
+      sessionToken
     );
 
     console.log('Generated presigned streaming URL', { 
