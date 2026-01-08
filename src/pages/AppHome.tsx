@@ -1572,17 +1572,40 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                     }`}>
                       {transcriptSource === 'batch' ? 'Batch (final)' : 'Live (draft)'}
                     </span>
-                    {/* Show upgrade button when batch is ready but still on live */}
+                    {/* Show upgrade buttons when batch is ready but still on live */}
                     {batchStatus === 'ready' && transcriptSource === 'live' && batchTranscriptRef.current && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleUseRefinedTranscript}
-                        className="h-6 text-xs px-2 py-0 ml-2"
-                      >
-                        <RefreshCw className="h-3 w-3 mr-1" />
-                        Use Refined
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleUseRefinedTranscript}
+                          className="h-6 text-xs px-2 py-0 ml-2"
+                        >
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                          Use Refined
+                        </Button>
+                        {hasNote && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => {
+                              // Apply refined transcript and regenerate note
+                              handleUseRefinedTranscript();
+                              // Delay to allow state to update
+                              setTimeout(() => handleGenerateSoap(), 100);
+                            }}
+                            disabled={isGeneratingSoap}
+                            className="h-6 text-xs px-2 py-0 ml-1"
+                          >
+                            {isGeneratingSoap ? (
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <FileText className="h-3 w-3 mr-1" />
+                            )}
+                            Regenerate Note
+                          </Button>
+                        )}
+                      </>
                     )}
                     {/* Show processing indicator */}
                     {batchStatus === 'transcribing' && (

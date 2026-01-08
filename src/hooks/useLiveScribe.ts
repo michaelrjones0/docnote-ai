@@ -1,3 +1,22 @@
+/**
+ * useLiveScribe - Encounter recording and transcription via AWS Transcribe Medical
+ * 
+ * PURPOSE: Full encounter recording with high-fidelity batch transcription.
+ * This hook handles ambient listening during patient encounters, NOT field dictation
+ * (which uses useDeepgramDictation for fast real-time insertion).
+ * 
+ * TRANSCRIPT QUALITY HIERARCHY:
+ * - Live chunks (AWS Medical) = draft quality during recording
+ * - Batch job (AWS Medical) = refined final quality after recording stops
+ * 
+ * WORKFLOW:
+ * 1. Recording: Captures audio, sends chunks for live transcription
+ * 2. Stop: Immediately provides live transcript for SOAP generation
+ * 3. Background: AWS batch job processes full recording for refined transcript
+ * 4. Ready: "Refined transcript available → Use / Regenerate" when batch completes
+ * 
+ * Never blocks UX on AWS batch - user can generate notes immediately from live draft.
+ */
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { LiveDraftMode } from './useDocNoteSession';
