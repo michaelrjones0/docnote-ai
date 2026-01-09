@@ -10,10 +10,13 @@
 
 import { Mic, MicOff, Loader2, Wifi, WifiOff, Radio, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useDictation, DictationMode } from '@/hooks/useDictation';
+import { useDictation, DictationMode, isDictationEnabled } from '@/hooks/useDictation';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+
+// Re-export for easy access
+export { isDictationEnabled };
 
 interface GlobalDictationButtonProps {
   className?: string;
@@ -138,6 +141,11 @@ export function GlobalDictationButton({ className }: GlobalDictationButtonProps)
       </Badge>
     );
   };
+
+  // If dictation is disabled, render nothing or a subtle indicator
+  if (!isDictationEnabled()) {
+    return null;
+  }
 
   return (
     <div className={cn('flex items-center gap-2', className)}>

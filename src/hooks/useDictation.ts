@@ -33,9 +33,14 @@ import { useStreamingDictation } from './useStreamingDictation';
 import { useDeepgramDictation } from './useDeepgramDictation';
 
 // Environment-driven flags
+// VITE_DICTATION_ENABLED: master switch for dictation feature (default: false - frozen until relay ready)
+const DICTATION_ENABLED = import.meta.env.VITE_DICTATION_ENABLED === 'true';
 const DICTATION_ENGINE = import.meta.env.VITE_DICTATION_ENGINE || 'batch';
 const STREAMING_ENABLED = import.meta.env.VITE_STREAMING_ENABLED === 'true';
 const DEEPGRAM_RELAY_URL = import.meta.env.VITE_DEEPGRAM_RELAY_URL || '';
+
+// Export for UI components to conditionally render
+export const isDictationEnabled = (): boolean => DICTATION_ENABLED;
 
 // Determine preferred mode: deepgram (only if relay configured) > streaming > batch
 function getPreferredMode(): DictationMode {
@@ -74,6 +79,9 @@ const FALLBACK_TIMEOUT_MS = 5000;
 
 export function useDictation(options: UseDictationOptions = {}): UseDictationReturn {
   const { onError, onNoFieldFocused } = options;
+
+  // If dictation is disabled, return a no-op interface
+  const dictationDisabled = !DICTATION_ENABLED;
 
   const [fallbackMode, setFallbackMode] = useState<DictationMode | null>(() => {
     // If Deepgram was requested but no relay URL, start in fallback mode immediately
@@ -286,6 +294,23 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRet
     mapStreamingStatus,
     notifyDeepgramUnavailableOnce,
   ]);
+
+  // If dictation is disabled, return disabled interface
+  if (dictationDisabled) {
+    return {
+      status: 'idle',
+      toggle: () => {
+        onError?.('Dictation is disabled. Set VITE_DICTATION_ENABLED=true to enable.');
+      },
+      stop: () => {},
+      error: null,
+      activeFieldId: null,
+      partialText: undefined,
+      streamHealth: undefined,
+      mode: 'batch',
+      fallbackReason: 'Dictation frozen until relay is configured',
+    };
+  }
 
   return result;
 }
