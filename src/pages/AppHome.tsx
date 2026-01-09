@@ -17,9 +17,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
+import { useEncounterTimings } from '@/hooks/useEncounterTimings';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 import { DictationProvider } from '@/contexts/DictationContext';
-import { GlobalDictationButton } from '@/components/GlobalDictationButton';
+import { GlobalDictationButton, isDictationEnabled } from '@/components/GlobalDictationButton';
+import { EncounterTimingsDisplay } from '@/components/encounters/EncounterTimingsDisplay';
 
 // Format recording time as mm:ss or hh:mm:ss if over 1 hour
 function formatRecordingTime(ms: number): string {
@@ -127,6 +129,9 @@ const AppHome = () => {
   const conflictBannerRef = useRef<HTMLDivElement>(null);
   const modeSwitchBannerRef = useRef<HTMLDivElement>(null);
 
+  // Timing instrumentation
+  const encounterTimings = useEncounterTimings();
+
   // Auto-scroll to conflict banner when it appears
   useEffect(() => {
     if (showConflictBanner && conflictBannerRef.current) {
@@ -151,6 +156,10 @@ const AppHome = () => {
     onTranscriptUpdate: (transcript) => {
       setTranscriptText(transcript);
       setTranscriptSource('live');
+      // Mark draft ready on first transcript update
+      if (transcript.trim() && !encounterTimings.timings.draftReadyAt) {
+        encounterTimings.markDraftReady();
+      }
       // Auto-scroll live transcript
       setTimeout(() => {
         if (liveTranscriptRef.current) {
@@ -174,16 +183,19 @@ const AppHome = () => {
   });
 
   const handleStartLiveScribe = async () => {
+    encounterTimings.markRecordingStarted();
     await liveScribe.startRecording();
   };
 
   const handleStopLiveScribe = async () => {
+    encounterTimings.markRecordingStopped();
     const finalTranscript = await liveScribe.stopRecording();
     
     // Set live transcript as initial canonical source
     if (finalTranscript?.trim()) {
       setTranscriptText(finalTranscript);
       setTranscriptSource('live');
+      encounterTimings.markDraftReady();
     }
     
     // Start batch transcription in background (non-blocking) for quality upgrade
@@ -191,6 +203,7 @@ const AppHome = () => {
     const audioBytes = liveScribe.getEstimatedAudioBytes();
     if (audioBytes > 20000) {
       // Fire and forget - batch runs in background, doesn't block user
+      encounterTimings.markBatchStarted();
       handleAutoBatchStart();
     }
     
@@ -611,6 +624,8 @@ const AppHome = () => {
     setSignatureNeededMessage(false);
     // Always use the latest preferences from ref to avoid stale closure
     const expectedMode = currentPrefs.noteEditorMode;
+    const source = transcriptSource === 'batch' ? 'batch' : 'draft';
+    encounterTimings.markGenerateStarted(source);
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-note', {
@@ -682,8 +697,9 @@ const AppHome = () => {
       });
     } finally {
       setIsGeneratingSoap(false);
+      encounterTimings.markGenerateCompleted();
     }
-  }, [docSession.transcriptText, handleNewGenerated, toast]);
+  }, [docSession.transcriptText, handleNewGenerated, toast, transcriptSource, encounterTimings]);
 
   // Handler for saving signature - sets flag for effect-based generation
   const handleSaveSignature = useCallback(() => {
@@ -1294,6 +1310,13 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {liveScribe.error}
               </div>
             )}
+
+            {/* Timing Instrumentation Display */}
+            <EncounterTimingsDisplay 
+              timings={encounterTimings.timings}
+              formatTiming={encounterTimings.formatTiming}
+              batchStatus={batchStatus === 'transcribing' ? 'processing' : batchStatus === 'ready' ? 'completed' : batchStatus === 'error' ? 'failed' : 'idle'}
+            />
           </CardContent>
         </Card>
 
