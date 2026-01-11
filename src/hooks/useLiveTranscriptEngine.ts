@@ -4,7 +4,7 @@
  * Provides engine indicator and forced engine selection for debugging.
  * 
  * Engine priority (auto mode):
- * 1. Deepgram relay (if VITE_DEEPGRAM_RELAY_URL is set and reachable)
+ * 1. Deepgram relay (if DEEPGRAM_RELAY_URL server secret is configured)
  * 2. Browser STT (if SpeechRecognition is supported)
  * 3. Chunked backend (fallback)
  * 
@@ -12,10 +12,11 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
+import { usePublicConfig } from './usePublicConfig';
 import { safeLog, safeWarn } from '@/lib/debug';
 
 export type LiveTranscriptEngine = 'deepgram' | 'browser' | 'chunk';
-export type EngineStatus = 'idle' | 'connecting' | 'ready' | 'error' | 'fallback';
+export type EngineStatus = 'idle' | 'connecting' | 'ready' | 'error' | 'fallback' | 'loading';
 
 export interface EngineState {
   // The engine currently being used for display
@@ -32,6 +33,8 @@ export interface EngineState {
   fallbackWarning: string | null;
   // Debug mode indicator
   isDebugForced: boolean;
+  // Config loading state
+  configLoading: boolean;
 }
 
 interface UseLiveTranscriptEngineOptions {
@@ -58,11 +61,6 @@ function getForcedEngine(): LiveTranscriptEngine | 'auto' {
   return 'auto';
 }
 
-// Check if Deepgram relay URL is configured
-function isDeepgramConfigured(): boolean {
-  return Boolean(import.meta.env.VITE_DEEPGRAM_RELAY_URL);
-}
-
 // Check if browser SpeechRecognition is supported
 function isBrowserSttSupported(): boolean {
   return Boolean(
@@ -84,8 +82,11 @@ export function useLiveTranscriptEngine(options: UseLiveTranscriptEngineOptions)
   const [fallbackWarning, setFallbackWarning] = useState<string | null>(null);
   const [didFallback, setDidFallback] = useState(false);
 
+  // Get runtime config
+  const { config, isLoading: configLoading } = usePublicConfig();
+  const deepgramConfigured = Boolean(config?.deepgramRelayUrl);
+
   const forcedEngine = getForcedEngine();
-  const deepgramConfigured = isDeepgramConfigured();
   const isDebugForced = forcedEngine !== 'auto';
 
   // Determine preferred engine (what we want to use)
@@ -136,6 +137,7 @@ export function useLiveTranscriptEngine(options: UseLiveTranscriptEngineOptions)
 
   // Determine engine status
   const getEngineStatus = useCallback((): EngineStatus => {
+    if (configLoading) return 'loading';
     if (!isRecording) return 'idle';
     
     const active = getActiveEngine();
@@ -159,10 +161,14 @@ export function useLiveTranscriptEngine(options: UseLiveTranscriptEngineOptions)
     
     // Chunk is always "ready" when recording
     return 'ready';
-  }, [isRecording, getActiveEngine, getPreferredEngine, deepgramConnecting, deepgramReady, deepgramError, browserListening]);
+  }, [configLoading, isRecording, getActiveEngine, getPreferredEngine, deepgramConnecting, deepgramReady, deepgramError, browserListening]);
 
   // Generate human-readable label
   const getLabel = useCallback((): string => {
+    if (configLoading) {
+      return 'Engine: Loading config...';
+    }
+    
     const active = getActiveEngine();
     const status = getEngineStatus();
     
@@ -181,7 +187,7 @@ export function useLiveTranscriptEngine(options: UseLiveTranscriptEngineOptions)
     }
     
     return label;
-  }, [getActiveEngine, getEngineStatus]);
+  }, [configLoading, getActiveEngine, getEngineStatus]);
 
   // Track fallback state
   useEffect(() => {
@@ -201,7 +207,7 @@ export function useLiveTranscriptEngine(options: UseLiveTranscriptEngineOptions)
       if (preferred === 'deepgram') {
         const message = deepgramError
           ? 'Deepgram relay unreachable — falling back to Browser STT'
-          : 'Deepgram relay not configured — using Browser STT';
+          : 'Relay not configured — using Browser STT';
         setFallbackWarning(message);
         safeWarn(`[EngineSelector] ${message}`);
       } else if (preferred === 'browser') {
@@ -219,6 +225,7 @@ export function useLiveTranscriptEngine(options: UseLiveTranscriptEngineOptions)
     didFallback,
     fallbackWarning,
     isDebugForced,
+    configLoading,
   };
 
   // Helper to check which engine should be used for display
