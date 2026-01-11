@@ -927,6 +927,7 @@ export function useLiveScribe(options: UseLiveScribeOptions = {}) {
   return {
     status,
     transcript,
+    partialTranscript: '', // Batch mode doesn't have partials - always empty for type compatibility
     segments,
     error,
     runningSummary,

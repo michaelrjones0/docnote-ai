@@ -44,6 +44,7 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
   
   const [status, setStatus] = useState<DeepgramStreamStatus>('idle');
   const [transcript, setTranscript] = useState('');
+  const [partialTranscript, setPartialTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<DeepgramStreamMetrics>({
     stopToFinalTranscriptMs: null,
@@ -202,6 +203,7 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
     setStatus('connecting');
     setError(null);
     setTranscript('');
+    setPartialTranscript('');
     accumulatedTranscriptRef.current = '';
     metricsRef.current = {
       stopToFinalTranscriptMs: null,
@@ -264,11 +266,14 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
               
             case 'partial':
               metricsRef.current.partialCount++;
+              setPartialTranscript(msg.text || '');
               onPartialTranscript?.(msg.text);
               break;
               
             case 'final':
               metricsRef.current.finalCount++;
+              // Clear partial since we got final
+              setPartialTranscript('');
               if (msg.text) {
                 accumulatedTranscriptRef.current = accumulatedTranscriptRef.current
                   ? `${accumulatedTranscriptRef.current} ${msg.text}`
@@ -483,6 +488,7 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
     cleanup();
     setStatus('idle');
     setTranscript('');
+    setPartialTranscript('');
     setError(null);
     setRecordingElapsedMs(0);
     accumulatedTranscriptRef.current = '';
@@ -499,6 +505,7 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
   return {
     status,
     transcript,
+    partialTranscript,
     error,
     metrics,
     recordingElapsedMs,

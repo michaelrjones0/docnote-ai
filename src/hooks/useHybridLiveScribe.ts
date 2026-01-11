@@ -90,6 +90,7 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
   // State
   const [status, setStatus] = useState<HybridLiveScribeStatus>('idle');
   const [transcript, setTranscript] = useState('');
+  const [partialTranscript, setPartialTranscript] = useState('');
   const [runningSummary, setRunningSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
@@ -114,11 +115,12 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
   const deepgramStream = useDeepgramStream({
     relayUrl: relayUrl || '',
     onPartialTranscript: (text) => {
-      // Could show interim results in UI if desired
+      setPartialTranscript(text || '');
     },
     onFinalTranscript: (fullTranscript) => {
       transcriptRef.current = fullTranscript;
       setTranscript(fullTranscript);
+      setPartialTranscript(''); // Clear partial on final
       setDebugInfo(prev => ({ ...prev, transcriptLength: fullTranscript.length }));
       onTranscriptUpdate?.(fullTranscript);
       
@@ -293,6 +295,7 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
     // Reset state
     setError(null);
     setTranscript('');
+    setPartialTranscript('');
     setRunningSummary(null);
     transcriptRef.current = '';
     lastSummaryLengthRef.current = 0;
@@ -360,6 +363,7 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
     
     setStatus('idle');
     setTranscript('');
+    setPartialTranscript('');
     setRunningSummary(null);
     setError(null);
     setRecordingElapsedMs(0);
@@ -384,6 +388,7 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
     // State
     status,
     transcript,
+    partialTranscript,
     runningSummary,
     error,
     recordingElapsedMs,
