@@ -73,6 +73,7 @@ export function useBrowserLiveTranscript(options: UseBrowserLiveTranscriptOption
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const finalTextRef = useRef('');
   const isStoppingRef = useRef(false);
+  const isListeningRef = useRef(false);
 
   // Check browser support on mount
   useEffect(() => {
@@ -119,6 +120,7 @@ export function useBrowserLiveTranscript(options: UseBrowserLiveTranscriptOption
 
     recognition.onstart = () => {
       safeLog('[BrowserLiveTranscript] Started listening');
+      isListeningRef.current = true;
       setStatus('listening');
     };
 
@@ -170,14 +172,17 @@ export function useBrowserLiveTranscript(options: UseBrowserLiveTranscriptOption
       safeLog('[BrowserLiveTranscript] Recognition ended');
       
       // If we weren't explicitly stopping, try to restart (continuous mode can stop unexpectedly)
-      if (!isStoppingRef.current && status === 'listening') {
+      if (isListeningRef.current && !isStoppingRef.current) {
         safeLog('[BrowserLiveTranscript] Auto-restarting...');
         try {
           recognition.start();
+          return; // Don't set idle if restarting
         } catch {
+          isListeningRef.current = false;
           setStatus('idle');
         }
       } else {
+        isListeningRef.current = false;
         setStatus('idle');
       }
     };
@@ -196,6 +201,7 @@ export function useBrowserLiveTranscript(options: UseBrowserLiveTranscriptOption
    * Stop listening immediately
    */
   const stopListening = useCallback(() => {
+    isListeningRef.current = false;
     isStoppingRef.current = true;
     
     if (recognitionRef.current) {
