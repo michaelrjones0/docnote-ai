@@ -1,0 +1,58 @@
+{
+  "family": "deepgram-relay",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "deepgram-relay",
+      "image": "${ECR_IMAGE_URI}",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "PORT", "value": "8080" }
+      ],
+      "secrets": [
+        {
+          "name": "DEEPGRAM_API_KEY",
+          "valueFrom": "${SECRETS_ARN}:DEEPGRAM_API_KEY::"
+        },
+        {
+          "name": "SUPABASE_URL",
+          "valueFrom": "${SECRETS_ARN}:SUPABASE_URL::"
+        },
+        {
+          "name": "SUPABASE_ANON_KEY",
+          "valueFrom": "${SECRETS_ARN}:SUPABASE_ANON_KEY::"
+        },
+        {
+          "name": "ALLOWED_ORIGINS",
+          "valueFrom": "${SECRETS_ARN}:ALLOWED_ORIGINS::"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/deepgram-relay",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "relay"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      }
+    }
+  ]
+}
