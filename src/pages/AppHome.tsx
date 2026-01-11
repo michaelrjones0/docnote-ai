@@ -17,6 +17,7 @@ import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNot
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { useHybridLiveScribe } from '@/hooks/useHybridLiveScribe';
+import { useBrowserLiveTranscript } from '@/hooks/useBrowserLiveTranscript';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 import { SettingsSheet } from '@/components/SettingsSheet';
 
@@ -197,14 +198,26 @@ const AppHome = () => {
   // Unified liveScribe interface - use streaming when available, otherwise batch
   const liveScribe = isStreamingAvailable ? hybridLiveScribe : batchLiveScribe;
 
+  // Browser SpeechRecognition for immediate visual feedback (separate from backend transcription)
+  const browserTranscript = useBrowserLiveTranscript();
+
   const handleStartLiveScribe = async () => {
+    // Start browser-based immediate transcript (for visual feedback)
+    if (browserTranscript.isSupported) {
+      browserTranscript.startListening();
+    }
+    // Start actual backend transcription
     await liveScribe.startRecording();
   };
 
   const handleStopLiveScribe = async () => {
+    // Stop browser transcript immediately
+    browserTranscript.stopListening();
+    
+    // Stop backend transcription
     const finalTranscript = await liveScribe.stopRecording();
     
-    // Auto-generate note if we have a transcript
+    // Auto-generate note if we have a transcript (use backend transcript, not browser)
     if (finalTranscript?.trim()) {
       setTranscriptText(finalTranscript);
       // Small delay to ensure state is updated
@@ -486,6 +499,9 @@ const AppHome = () => {
       // Force reset live scribe internal state - handled by clearSession already
     }
     
+    // Reset browser transcript
+    browserTranscript.reset();
+    
     // Clear patient-specific fields from preferences (keep clinician settings)
     setPreferences({ 
       patientName: '', 
@@ -499,7 +515,7 @@ const AppHome = () => {
       title: 'Encounter ended',
       description: 'Ready for a new patient. Please enter patient info to begin.',
     });
-  }, [clearSession, liveScribe.status, setPreferences, toast]);
+  }, [clearSession, liveScribe.status, browserTranscript, setPreferences, toast]);
 
   const copyToClipboard = async (text: string, fieldName: string) => {
     try {
@@ -929,18 +945,42 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             )}
 
             {/* Live Transcript Display - show during recording, paused, or if transcript exists */}
-            {(liveScribe.status === 'recording' || liveScribe.status === 'paused' || liveScribe.transcript) && (
+            {(liveScribe.status === 'recording' || liveScribe.status === 'paused' || liveScribe.transcript || browserTranscript.finalText) && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium">
+                <Label className="text-sm font-medium flex items-center gap-2">
                   Live Transcript
-                  {liveScribe.status === 'paused' && <span className="text-xs text-muted-foreground ml-2">(paused)</span>}
+                  {liveScribe.status === 'paused' && <span className="text-xs text-muted-foreground">(paused)</span>}
+                  {browserTranscript.isListening && (
+                    <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                      Browser STT
+                    </span>
+                  )}
                 </Label>
                 <pre 
                   ref={liveTranscriptRef}
                   className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-48 whitespace-pre-wrap font-mono border"
                 >
-                  {liveScribe.transcript || (liveScribe.status === 'recording' ? 'Listening...' : liveScribe.status === 'paused' ? 'Paused...' : '')}
+                  {/* During recording: show browser transcript (immediate) with interim text in grey */}
+                  {liveScribe.status === 'recording' ? (
+                    <>
+                      {browserTranscript.finalText || ''}
+                      {browserTranscript.interimText && (
+                        <span className="text-muted-foreground">{browserTranscript.finalText ? ' ' : ''}{browserTranscript.interimText}</span>
+                      )}
+                      {!browserTranscript.finalText && !browserTranscript.interimText && 'Listening...'}
+                    </>
+                  ) : (
+                    /* When stopped: show backend transcript (used for note generation) */
+                    liveScribe.transcript || (liveScribe.status === 'paused' ? 'Paused...' : '')
+                  )}
                 </pre>
+                {/* Show backend transcript count when different from browser */}
+                {liveScribe.status === 'recording' && liveScribe.transcript && (
+                  <p className="text-xs text-muted-foreground">
+                    Backend transcript: {liveScribe.transcript.length} chars
+                  </p>
+                )}
               </div>
             )}
 
