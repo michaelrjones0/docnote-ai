@@ -42,6 +42,7 @@ export interface HybridLiveScribeDebugInfo {
 interface UseHybridLiveScribeOptions {
   onTranscriptUpdate?: (transcript: string) => void;
   onSummaryUpdate?: (summary: string) => void;
+  onReady?: () => void;
   onError?: (error: string) => void;
   liveDraftMode?: LiveDraftMode;
   preferences?: object;
@@ -78,6 +79,7 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
   const {
     onTranscriptUpdate,
     onSummaryUpdate,
+    onReady,
     onError,
     liveDraftMode = 'A',
     preferences = {},
@@ -114,6 +116,10 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
   // Deepgram stream hook
   const deepgramStream = useDeepgramStream({
     relayUrl: relayUrl || '',
+    onReady: () => {
+      safeLog('[HybridLiveScribe] Deepgram relay ready');
+      onReady?.();
+    },
     onPartialTranscript: (text) => {
       setPartialTranscript(text || '');
     },
