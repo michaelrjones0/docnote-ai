@@ -95,49 +95,6 @@ export function SettingsSheet({ preferences, setPreferences }: SettingsSheetProp
         </SheetHeader>
 
         <div className="mt-6 space-y-6">
-          {/* Change Password Section */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-muted-foreground" />
-              <h3 className="font-medium">Change Password</h3>
-            </div>
-            
-            <div className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="new-password" className="text-sm">New Password</Label>
-                <Input
-                  id="new-password"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-password" className="text-sm">Confirm New Password</Label>
-                <Input
-                  id="confirm-password"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
-              <Button 
-                onClick={handleChangePassword} 
-                disabled={isChangingPassword || !newPassword || !confirmPassword}
-                className="w-full"
-              >
-                {isChangingPassword ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : null}
-                Update Password
-              </Button>
-            </div>
-          </div>
-
-          <Separator />
-
           {/* Note Preferences Section */}
           <div className="space-y-4">
             <div className="flex items-center gap-2">
@@ -303,6 +260,49 @@ export function SettingsSheet({ preferences, setPreferences }: SettingsSheetProp
                   Style only. Cannot add facts not in transcript. ({preferences.styleText.length}/600)
                 </p>
               </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Change Password Section */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-muted-foreground" />
+              <h3 className="font-medium">Change Password</h3>
+            </div>
+            
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="new-password" className="text-sm">New Password</Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-password" className="text-sm">Confirm New Password</Label>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </div>
+              <Button 
+                onClick={handleChangePassword} 
+                disabled={isChangingPassword || !newPassword || !confirmPassword}
+                className="w-full"
+              >
+                {isChangingPassword ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : null}
+                Update Password
+              </Button>
             </div>
           </div>
         </div>
