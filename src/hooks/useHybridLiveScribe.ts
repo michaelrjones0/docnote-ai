@@ -5,12 +5,14 @@
  * - Immediate final transcripts on each utterance
  * - Running Summary throttled: single in-flight job, 45s debounce, never blocks audio/stop
  * 
- * Falls back to useLiveScribe (batch) if VITE_DEEPGRAM_RELAY_URL is not configured.
+ * Falls back to Browser STT if DEEPGRAM_RELAY_URL is not configured in server secrets.
+ * Config is fetched at runtime via public-config edge function.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useDeepgramStream, DeepgramStreamStatus, DeepgramStreamMetrics } from './useDeepgramStream';
+import { usePublicConfig } from './usePublicConfig';
 import type { LiveDraftMode } from './useDocNoteSession';
 import { safeLog, safeWarn, safeErrorLog } from '@/lib/debug';
 
@@ -37,6 +39,9 @@ export interface HybridLiveScribeDebugInfo {
   lastLiveStatus: 'idle' | 'calling' | 'received' | 'error';
   lastLiveCallAt: string | null;
   lastLiveError: string | null;
+  // Config status
+  configLoading?: boolean;
+  configError?: string | null;
 }
 
 interface UseHybridLiveScribeOptions {
@@ -73,6 +78,8 @@ const createDefaultDebugInfo = (engine: 'deepgram' | 'batch', streamStatus: Deep
   lastLiveStatus: 'idle',
   lastLiveCallAt: null,
   lastLiveError: null,
+  configLoading: false,
+  configError: null,
 });
 
 export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
@@ -85,8 +92,11 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
     preferences = {},
   } = options;
 
-  // Check if Deepgram relay is configured
-  const relayUrl = import.meta.env.VITE_DEEPGRAM_RELAY_URL;
+  // Fetch runtime config
+  const { config, isLoading: configLoading, error: configError } = usePublicConfig();
+  
+  // Determine if streaming is available based on runtime config
+  const relayUrl = config?.deepgramRelayUrl || '';
   const useStreaming = Boolean(relayUrl);
 
   // State
@@ -97,10 +107,20 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
   const [error, setError] = useState<string | null>(null);
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
   
-  // Debug info
+  // Debug info - update engine based on config
   const [debugInfo, setDebugInfo] = useState<HybridLiveScribeDebugInfo>(
-    createDefaultDebugInfo(useStreaming ? 'deepgram' : 'batch')
+    createDefaultDebugInfo('batch') // Start with batch until config loads
   );
+
+  // Update debug info when config changes
+  useEffect(() => {
+    setDebugInfo(prev => ({
+      ...prev,
+      engine: useStreaming ? 'deepgram' : 'batch',
+      configLoading,
+      configError,
+    }));
+  }, [useStreaming, configLoading, configError]);
 
   // Refs for summary throttling
   const summaryInFlightRef = useRef(false);
@@ -291,10 +311,16 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
    * Start recording with Deepgram streaming
    */
   const startRecording = useCallback(async () => {
+    if (configLoading) {
+      setError('Configuration still loading');
+      onError?.('Configuration still loading');
+      return;
+    }
+    
     if (!useStreaming) {
-      setError('Deepgram relay not configured (VITE_DEEPGRAM_RELAY_URL)');
+      setError('Relay not configured');
       setStatus('error');
-      onError?.('Deepgram relay not configured');
+      onError?.('Relay not configured');
       return;
     }
     
@@ -313,7 +339,7 @@ export function useHybridLiveScribe(options: UseHybridLiveScribeOptions = {}) {
     
     await deepgramStream.startRecording();
     safeLog('[HybridLiveScribe] Started Deepgram streaming');
-  }, [useStreaming, deepgramStream, onError]);
+  }, [configLoading, useStreaming, deepgramStream, onError]);
 
   /**
    * Stop recording and get final transcript
