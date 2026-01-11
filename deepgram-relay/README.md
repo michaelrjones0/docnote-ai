@@ -30,10 +30,11 @@ Port 8080 serves both:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DEEPGRAM_API_KEY` | Yes | Deepgram API key |
-| `SUPABASE_URL` | Yes | Supabase project URL |
-| `SUPABASE_ANON_KEY` | Yes | Supabase anon key for JWT verification |
+| `SUPABASE_JWT_SECRET` | Yes | Supabase JWT secret (from Project Settings → API → JWT Settings) |
 | `ALLOWED_ORIGINS` | No | Comma-separated allowed origins |
 | `PORT` | No | Server port (default: 8080) |
+
+**Note:** JWT verification is done locally using HS256 - no network calls to Supabase.
 
 ## Deployment: ECS Fargate + ALB
 
@@ -67,12 +68,13 @@ docker push <ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/deepgram-relay:latest
 aws secretsmanager create-secret \
   --name deepgram-relay/config \
   --secret-string '{
-    "DEEPGRAM_API_KEY": "your-key",
-    "SUPABASE_URL": "https://xxx.supabase.co",
-    "SUPABASE_ANON_KEY": "your-anon-key",
+    "DEEPGRAM_API_KEY": "your-deepgram-key",
+    "SUPABASE_JWT_SECRET": "your-supabase-jwt-secret",
     "ALLOWED_ORIGINS": "https://your-app.lovable.app"
   }'
 ```
+
+**To find your Supabase JWT Secret:** Go to Project Settings → API → JWT Settings → JWT Secret.
 
 ### 4. Create ECS Cluster
 
@@ -122,8 +124,7 @@ Point your domain to the ALB (e.g., `relay.yourdomain.com`)
 npm install
 
 DEEPGRAM_API_KEY=xxx \
-SUPABASE_URL=https://xxx.supabase.co \
-SUPABASE_ANON_KEY=xxx \
+SUPABASE_JWT_SECRET=your-jwt-secret \
 npm start
 ```
 

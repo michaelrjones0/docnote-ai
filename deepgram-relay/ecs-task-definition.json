@@ -26,12 +26,8 @@
           "valueFrom": "${SECRETS_ARN}:DEEPGRAM_API_KEY::"
         },
         {
-          "name": "SUPABASE_URL",
-          "valueFrom": "${SECRETS_ARN}:SUPABASE_URL::"
-        },
-        {
-          "name": "SUPABASE_ANON_KEY",
-          "valueFrom": "${SECRETS_ARN}:SUPABASE_ANON_KEY::"
+          "name": "SUPABASE_JWT_SECRET",
+          "valueFrom": "${SECRETS_ARN}:SUPABASE_JWT_SECRET::"
         },
         {
           "name": "ALLOWED_ORIGINS",

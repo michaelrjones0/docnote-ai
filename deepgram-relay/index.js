@@ -21,59 +21,62 @@
 
 const http = require('http');
 const WebSocket = require('ws');
-const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
 
 // Configuration from environment
 const PORT = process.env.PORT || 8080;
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
-
-// Deepgram configuration for medical transcription
-const DEEPGRAM_CONFIG = {
-  model: 'nova-2-medical',
-  language: 'en-US',
-  encoding: 'linear16',
-  sample_rate: 16000,
-  channels: 1,
-  interim_results: true,
-  endpointing: 300,
-  punctuate: true,
-  smart_format: true,
-};
-
-// KeepAlive interval (Deepgram requires activity every 10s, we send every 3s to be safe)
-const KEEPALIVE_INTERVAL_MS = 3000;
 
 // Validate required environment variables
 if (!DEEPGRAM_API_KEY) {
   console.error('[FATAL] DEEPGRAM_API_KEY is required');
   process.exit(1);
 }
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error('[FATAL] SUPABASE_URL and SUPABASE_ANON_KEY are required');
+if (!SUPABASE_JWT_SECRET) {
+  console.error('[FATAL] SUPABASE_JWT_SECRET is required for local JWT verification');
   process.exit(1);
 }
-
-// Initialize Supabase client for JWT verification
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Active sessions tracking
 const sessions = new Map();
 
 /**
- * Verify Supabase JWT and return user info
+ * Verify Supabase JWT locally using HS256 signature
+ * No network call - fast and robust for WebSocket auth
  */
-async function verifyToken(accessToken) {
+function verifyToken(accessToken) {
   try {
-    const { data: { user }, error } = await supabase.auth.getUser(accessToken);
-    if (error || !user) {
+    // Verify HS256 signature using Supabase JWT secret
+    const decoded = jwt.verify(accessToken, SUPABASE_JWT_SECRET, {
+      algorithms: ['HS256'],
+    });
+    
+    // Extract user ID from 'sub' claim (standard JWT)
+    const userId = decoded.sub;
+    if (!userId) {
+      console.error('[Auth] JWT missing sub claim');
       return null;
     }
-    return { userId: user.id };
+    
+    // Check expiration (jwt.verify already does this, but be explicit)
+    const now = Math.floor(Date.now() / 1000);
+    if (decoded.exp && decoded.exp < now) {
+      console.error('[Auth] JWT expired');
+      return null;
+    }
+    
+    return { userId };
   } catch (err) {
-    console.error('[Auth] Token verification failed');
+    // Log error type without sensitive details
+    if (err.name === 'TokenExpiredError') {
+      console.error('[Auth] JWT expired');
+    } else if (err.name === 'JsonWebTokenError') {
+      console.error('[Auth] JWT invalid signature or format');
+    } else {
+      console.error('[Auth] JWT verification failed');
+    }
     return null;
   }
 }
@@ -301,7 +304,7 @@ wss.on('connection', (clientWs, req) => {
   /**
    * Handle client messages
    */
-  clientWs.on('message', async (data, isBinary) => {
+  clientWs.on('message', (data, isBinary) => {
     // Binary data = audio
     if (isBinary) {
       if (!session.authenticated) {
@@ -326,7 +329,8 @@ wss.on('connection', (clientWs, req) => {
           return;
         }
         
-        const authResult = await verifyToken(msg.access_token);
+        // Local JWT verification (no network call)
+        const authResult = verifyToken(msg.access_token);
         
         if (!authResult) {
           console.warn(`[${sessionId}] Auth failed`);

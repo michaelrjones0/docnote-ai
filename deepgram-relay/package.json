@@ -8,9 +8,8 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "@deepgram/sdk": "^3.0.0",
-    "ws": "^8.14.0",
-    "@supabase/supabase-js": "^2.39.0"
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.14.0"
   },
   "engines": {
     "node": ">=18.0.0"
