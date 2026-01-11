@@ -145,7 +145,8 @@ const AppHome = () => {
     }
   }, [preferences.noteEditorMode, getCurrentNoteType, getCurrentSoap, getCurrentSoap3]);
   // Check if Deepgram streaming is available
-  const isStreamingAvailable = Boolean(import.meta.env.VITE_DEEPGRAM_RELAY_URL);
+  const deepgramRelayUrl = import.meta.env.VITE_DEEPGRAM_RELAY_URL || '';
+  const isStreamingAvailable = Boolean(deepgramRelayUrl);
   
   // Hybrid Live Scribe (Deepgram streaming) - used when relay is configured
   const hybridLiveScribe = useHybridLiveScribe({
@@ -208,6 +209,7 @@ const AppHome = () => {
     shouldUseDeepgramForDisplay,
     shouldUseBrowserForDisplay,
     isDebugForced,
+    forcedEngine,
   } = useLiveTranscriptEngine({
     deepgramReady: hybridLiveScribe.status === 'recording',
     deepgramConnecting: hybridLiveScribe.status === 'connecting',
@@ -216,21 +218,59 @@ const AppHome = () => {
     browserSupported: browserTranscript.isSupported,
     isRecording: liveScribe.status === 'recording' || liveScribe.status === 'connecting',
   });
+  
+  // Derive actual engine being used based on connection state
+  const actualEngine = (() => {
+    if (isStreamingAvailable && hybridLiveScribe.status === 'recording') return 'deepgram';
+    if (browserTranscript.isListening) return 'browser';
+    if (liveScribe.status === 'recording') return 'aws'; // chunked backend
+    return 'none';
+  })();
 
+  // Track Deepgram connection state for fallback logic
+  const [deepgramConnected, setDeepgramConnected] = useState(false);
+  const [deepgramFailed, setDeepgramFailed] = useState(false);
+  
   const handleStartLiveScribe = async () => {
-    // Start browser-based immediate transcript if using browser engine
-    if (shouldUseBrowserForDisplay && browserTranscript.isSupported) {
-      browserTranscript.startListening();
+    // Reset Deepgram connection state
+    setDeepgramConnected(false);
+    setDeepgramFailed(false);
+    
+    // If Deepgram is available, try it first (primary engine)
+    if (isStreamingAvailable) {
+      // PHI-safe log: connection attempt
+      console.log(`[LiveTranscript] Attempting Deepgram relay connection to: ${deepgramRelayUrl}/dictate`);
+      
+      // Start Deepgram streaming - will set connection state via callbacks
+      await liveScribe.startRecording();
+      
+      // Check if Deepgram connected successfully after a brief delay
+      setTimeout(() => {
+        if (hybridLiveScribe.status === 'recording') {
+          setDeepgramConnected(true);
+          console.log('[LiveTranscript] Deepgram relay connected successfully');
+        } else if (hybridLiveScribe.status === 'error') {
+          setDeepgramFailed(true);
+          console.warn('[LiveTranscript] Deepgram relay failed, falling back to Browser STT');
+          // Start browser fallback
+          if (browserTranscript.isSupported) {
+            browserTranscript.startListening();
+          }
+        }
+      }, 1500);
+    } else {
+      // No Deepgram configured - use browser STT directly
+      console.log('[LiveTranscript] No Deepgram relay configured, using Browser STT');
+      if (browserTranscript.isSupported) {
+        browserTranscript.startListening();
+      }
+      await liveScribe.startRecording();
     }
-    // Start actual backend transcription
-    await liveScribe.startRecording();
   };
 
   const handleStopLiveScribe = async () => {
-    // Stop browser transcript immediately (only if we were using it)
-    if (shouldUseBrowserForDisplay) {
-      browserTranscript.stopListening();
-    }
+    // Stop browser transcript (always stop it, might have been fallback)
+    browserTranscript.stopListening();
     
     // Stop backend transcription
     const finalTranscript = await liveScribe.stopRecording();
@@ -975,25 +1015,31 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                   {(liveScribe.status === 'recording' || liveScribe.status === 'connecting') && (
                     <div className="flex items-center gap-2">
                       <span className={`text-xs font-mono px-2 py-0.5 rounded ${
-                        engineState.status === 'ready' 
+                        actualEngine === 'deepgram' 
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
-                          : engineState.status === 'connecting'
+                          : actualEngine === 'browser'
+                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                          : liveScribe.status === 'connecting'
                           ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
-                          : engineState.status === 'fallback'
-                          ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                          : 'bg-muted text-muted-foreground'
+                          : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                       }`}>
-                        {engineState.status === 'ready' && (
+                        {actualEngine === 'deepgram' && (
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-1.5" />
                         )}
-                        {engineState.status === 'connecting' && (
+                        {actualEngine === 'browser' && (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse mr-1.5" />
+                        )}
+                        {liveScribe.status === 'connecting' && actualEngine === 'none' && (
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse mr-1.5" />
                         )}
-                        {engineState.label}
+                        {actualEngine === 'deepgram' ? 'Deepgram STT' : 
+                         actualEngine === 'browser' ? 'Browser STT' : 
+                         actualEngine === 'aws' ? 'AWS Chunked' : 
+                         'Connecting...'}
                       </span>
                       {isDebugForced && (
                         <span className="text-xs text-purple-600 dark:text-purple-400 font-mono">
-                          [DEBUG]
+                          [DEBUG: {forcedEngine}]
                         </span>
                       )}
                     </div>
@@ -1012,10 +1058,11 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                   ref={liveTranscriptRef}
                   className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-48 whitespace-pre-wrap font-mono border"
                 >
-                  {/* During recording: show live transcript with interim text in grey */}
+                  {/* During recording: Deepgram is primary, Browser STT is fallback */}
                   {liveScribe.status === 'recording' ? (
-                    shouldUseDeepgramForDisplay ? (
-                      /* Deepgram streaming: show final + partial */
+                    /* Priority: Deepgram > Browser STT > Chunked backend */
+                    actualEngine === 'deepgram' ? (
+                      /* Deepgram streaming: show final + partial (punctuated) */
                       <>
                         {hybridLiveScribe.transcript || ''}
                         {hybridLiveScribe.partialTranscript && (
@@ -1023,8 +1070,8 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                         )}
                         {!hybridLiveScribe.transcript && !hybridLiveScribe.partialTranscript && 'Listening...'}
                       </>
-                    ) : shouldUseBrowserForDisplay ? (
-                      /* Browser STT: show browser transcript */
+                    ) : actualEngine === 'browser' ? (
+                      /* Browser STT fallback */
                       <>
                         {browserTranscript.finalText || ''}
                         {browserTranscript.interimText && (
@@ -1033,7 +1080,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                         {!browserTranscript.finalText && !browserTranscript.interimText && 'Listening...'}
                       </>
                     ) : (
-                      /* Chunked backend: show accumulated transcript */
+                      /* AWS chunked backend fallback */
                       <>
                         {liveScribe.transcript || 'Transcribing...'}
                       </>
@@ -1043,8 +1090,43 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                     liveScribe.transcript || (liveScribe.status === 'paused' ? 'Paused...' : '')
                   )}
                 </pre>
+                
+                {/* Debug Line: Visible engine + WS URL during recording */}
+                {liveScribe.status === 'recording' && (
+                  <div className="flex flex-col gap-1 p-2 bg-slate-100 dark:bg-slate-800 rounded text-xs font-mono border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-foreground">Engine:</span>
+                      <span className={`px-1.5 py-0.5 rounded ${
+                        actualEngine === 'deepgram' 
+                          ? 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200' 
+                          : actualEngine === 'browser'
+                          ? 'bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-200'
+                          : 'bg-amber-200 text-amber-800 dark:bg-amber-800 dark:text-amber-200'
+                      }`}>
+                        {actualEngine === 'deepgram' ? 'Deepgram STT' : actualEngine === 'browser' ? 'Browser STT' : 'AWS Chunked'}
+                      </span>
+                      {actualEngine === 'deepgram' && (
+                        <span className="text-green-600 dark:text-green-400">✓ Connected</span>
+                      )}
+                      {actualEngine === 'browser' && isStreamingAvailable && (
+                        <span className="text-orange-600 dark:text-orange-400">⚠ Deepgram fallback</span>
+                      )}
+                    </div>
+                    {isStreamingAvailable && (
+                      <div className="text-muted-foreground truncate">
+                        <span className="font-semibold">WS URL:</span> {deepgramRelayUrl}/dictate
+                      </div>
+                    )}
+                    {!isStreamingAvailable && (
+                      <div className="text-muted-foreground">
+                        <span className="font-semibold">Note:</span> VITE_DEEPGRAM_RELAY_URL not configured
+                      </div>
+                    )}
+                  </div>
+                )}
+                
                 {/* Show backend transcript count when using browser display */}
-                {liveScribe.status === 'recording' && shouldUseBrowserForDisplay && liveScribe.transcript && (
+                {liveScribe.status === 'recording' && actualEngine === 'browser' && liveScribe.transcript && (
                   <p className="text-xs text-muted-foreground">
                     Backend transcript: {liveScribe.transcript.length} chars
                   </p>
