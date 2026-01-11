@@ -3,7 +3,11 @@
  * 
  * HIPAA-safe relay for real-time medical transcription.
  * 
- * Deployment: AWS App Runner (recommended) or ECS/Fargate
+ * Deployment: ECS Fargate + ALB (NOT App Runner - WebSocket issues)
+ * 
+ * Single port serves both:
+ * - GET /health → HTTP 200 health check
+ * - WebSocket /dictate → Deepgram streaming relay
  * 
  * Protocol:
  * 1. Client connects to wss://<RELAY_DOMAIN>/dictate
@@ -15,6 +19,7 @@
  * PHI-Safe Logging: No transcript text or audio content is logged.
  */
 
+const http = require('http');
 const WebSocket = require('ws');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -38,6 +43,9 @@ const DEEPGRAM_CONFIG = {
   smart_format: true,
 };
 
+// KeepAlive interval (Deepgram requires activity every 10s, we send every 3s to be safe)
+const KEEPALIVE_INTERVAL_MS = 3000;
+
 // Validate required environment variables
 if (!DEEPGRAM_API_KEY) {
   console.error('[FATAL] DEEPGRAM_API_KEY is required');
@@ -51,11 +59,7 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 // Initialize Supabase client for JWT verification
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Create WebSocket server
-const wss = new WebSocket.Server({ port: PORT });
-console.log(`[Relay] WebSocket server listening on port ${PORT}`);
-
-// Active sessions (1 per client connection)
+// Active sessions tracking
 const sessions = new Map();
 
 /**
@@ -93,7 +97,44 @@ function buildDeepgramUrl() {
 }
 
 /**
- * Handle client WebSocket connection
+ * Create HTTP server for health checks and WebSocket upgrades
+ */
+const server = http.createServer((req, res) => {
+  // Health check endpoint for ALB
+  if (req.url === '/health' || req.url === '/health/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      status: 'healthy', 
+      sessions: sessions.size,
+      uptime: process.uptime()
+    }));
+    return;
+  }
+  
+  // Root endpoint
+  if (req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ service: 'deepgram-relay', status: 'running' }));
+    return;
+  }
+  
+  // 404 for other HTTP requests
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found' }));
+});
+
+/**
+ * Create WebSocket server attached to HTTP server
+ */
+const wss = new WebSocket.Server({ 
+  server, 
+  path: '/dictate'
+});
+
+console.log(`[Relay] Starting server on port ${PORT}`);
+
+/**
+ * Handle WebSocket connections
  */
 wss.on('connection', (clientWs, req) => {
   const sessionId = Math.random().toString(36).substring(7);
@@ -104,13 +145,14 @@ wss.on('connection', (clientWs, req) => {
   
   // Origin check (if ALLOWED_ORIGINS is configured)
   if (ALLOWED_ORIGINS.length > 0 && !ALLOWED_ORIGINS.includes(origin)) {
-    console.warn(`[${sessionId}] Origin not allowed: ${origin}`);
+    console.warn(`[${sessionId}] Origin not allowed`);
     clientWs.close(4003, 'Origin not allowed');
     return;
   }
   
   // Session state
   const session = {
+    id: sessionId,
     authenticated: false,
     userId: null,
     deepgramWs: null,
@@ -120,6 +162,8 @@ wss.on('connection', (clientWs, req) => {
     finalTranscriptLength: 0,
     startTime: null,
     connectionTimeout: null,
+    keepAliveInterval: null,
+    isStopping: false,
   };
   
   sessions.set(sessionId, session);
@@ -131,6 +175,35 @@ wss.on('connection', (clientWs, req) => {
       clientWs.close(4001, 'Authentication timeout');
     }
   }, 5000);
+  
+  /**
+   * Start KeepAlive interval to Deepgram
+   */
+  function startKeepAlive() {
+    if (session.keepAliveInterval) {
+      clearInterval(session.keepAliveInterval);
+    }
+    
+    session.keepAliveInterval = setInterval(() => {
+      if (session.deepgramWs?.readyState === WebSocket.OPEN && !session.isStopping) {
+        try {
+          session.deepgramWs.send(JSON.stringify({ type: 'KeepAlive' }));
+        } catch (err) {
+          console.error(`[${sessionId}] KeepAlive send failed`);
+        }
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+  }
+  
+  /**
+   * Stop KeepAlive interval
+   */
+  function stopKeepAlive() {
+    if (session.keepAliveInterval) {
+      clearInterval(session.keepAliveInterval);
+      session.keepAliveInterval = null;
+    }
+  }
   
   /**
    * Connect to Deepgram once authenticated
@@ -151,6 +224,9 @@ wss.on('connection', (clientWs, req) => {
     dgWs.on('open', () => {
       console.log(`[${sessionId}] Deepgram connected`);
       clientWs.send(JSON.stringify({ type: 'ready' }));
+      
+      // Start KeepAlive to prevent Deepgram idle timeout
+      startKeepAlive();
     });
     
     dgWs.on('message', (data) => {
@@ -171,7 +247,7 @@ wss.on('connection', (clientWs, req) => {
               text: transcript,
               speech_final: msg.speech_final || false,
             }));
-          } else {
+          } else if (transcript) {
             session.partialCount++;
             
             // Send partial transcript to client
@@ -181,24 +257,44 @@ wss.on('connection', (clientWs, req) => {
             }));
           }
         } else if (msg.type === 'Metadata') {
-          // Just log metadata, don't forward
           console.log(`[${sessionId}] Deepgram metadata received`);
         } else if (msg.type === 'UtteranceEnd') {
           clientWs.send(JSON.stringify({ type: 'utterance_end' }));
         }
       } catch (err) {
-        console.error(`[${sessionId}] Error parsing Deepgram message`);
+        // Ignore parse errors for non-JSON messages
       }
     });
     
     dgWs.on('close', (code, reason) => {
       console.log(`[${sessionId}] Deepgram closed: ${code}`);
+      stopKeepAlive();
       session.deepgramWs = null;
+      
+      // If we were stopping, send done message
+      if (session.isStopping) {
+        const duration = Date.now() - (session.startTime || Date.now());
+        clientWs.send(JSON.stringify({
+          type: 'done',
+          stats: {
+            durationMs: duration,
+            audioBytesSent: session.audioBytesSent,
+            partialCount: session.partialCount,
+            finalCount: session.finalCount,
+            finalTranscriptLength: session.finalTranscriptLength,
+          },
+        }));
+      }
     });
     
     dgWs.on('error', (err) => {
       console.error(`[${sessionId}] Deepgram error`);
+      stopKeepAlive();
       session.deepgramWs = null;
+      
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ type: 'error', error: 'Deepgram connection failed' }));
+      }
     });
   }
   
@@ -213,7 +309,7 @@ wss.on('connection', (clientWs, req) => {
         return;
       }
       
-      if (session.deepgramWs?.readyState === WebSocket.OPEN) {
+      if (session.deepgramWs?.readyState === WebSocket.OPEN && !session.isStopping) {
         session.deepgramWs.send(data);
         session.audioBytesSent += data.length;
       }
@@ -251,31 +347,37 @@ wss.on('connection', (clientWs, req) => {
         
       } else if (msg.type === 'stop') {
         console.log(`[${sessionId}] Stop received`);
+        session.isStopping = true;
         
-        // Close Deepgram connection to get final results
+        // Stop KeepAlive
+        stopKeepAlive();
+        
+        // Send CloseStream to Deepgram to flush final results
         if (session.deepgramWs?.readyState === WebSocket.OPEN) {
-          // Send close frame to Deepgram
-          session.deepgramWs.send(JSON.stringify({ type: 'CloseStream' }));
+          try {
+            session.deepgramWs.send(JSON.stringify({ type: 'CloseStream' }));
+          } catch (err) {
+            console.error(`[${sessionId}] CloseStream send failed`);
+          }
           
-          // Wait a moment for final results, then close
+          // Give Deepgram time to flush, then close
           setTimeout(() => {
-            session.deepgramWs?.close();
-            
-            // Send done message with stats
-            const duration = Date.now() - (session.startTime || Date.now());
-            clientWs.send(JSON.stringify({
-              type: 'done',
-              stats: {
-                durationMs: duration,
-                audioBytesSent: session.audioBytesSent,
-                partialCount: session.partialCount,
-                finalCount: session.finalCount,
-                finalTranscriptLength: session.finalTranscriptLength,
-              },
-            }));
-          }, 500);
+            if (session.deepgramWs) {
+              session.deepgramWs.close();
+            }
+          }, 1000);
         } else {
-          clientWs.send(JSON.stringify({ type: 'done', stats: {} }));
+          // No Deepgram connection, send done immediately
+          clientWs.send(JSON.stringify({
+            type: 'done',
+            stats: {
+              durationMs: Date.now() - (session.startTime || Date.now()),
+              audioBytesSent: session.audioBytesSent,
+              partialCount: session.partialCount,
+              finalCount: session.finalCount,
+              finalTranscriptLength: session.finalTranscriptLength,
+            },
+          }));
         }
         
       } else if (msg.type === 'ping') {
@@ -292,10 +394,12 @@ wss.on('connection', (clientWs, req) => {
    */
   clientWs.on('close', () => {
     const duration = Date.now() - connectTime;
-    console.log(`[${sessionId}] Client disconnected after ${duration}ms, bytes sent: ${session.audioBytesSent}, finals: ${session.finalCount}`);
+    console.log(`[${sessionId}] Client disconnected after ${duration}ms, bytes: ${session.audioBytesSent}, finals: ${session.finalCount}`);
     
     // Cleanup
     clearTimeout(session.connectionTimeout);
+    stopKeepAlive();
+    
     if (session.deepgramWs) {
       session.deepgramWs.close();
     }
@@ -307,27 +411,35 @@ wss.on('connection', (clientWs, req) => {
   });
 });
 
-// Health check endpoint for App Runner
-const http = require('http');
-const healthServer = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'healthy', sessions: sessions.size }));
-  } else {
-    res.writeHead(404);
-    res.end();
-  }
-});
-
-const HEALTH_PORT = process.env.HEALTH_PORT || 8081;
-healthServer.listen(HEALTH_PORT, () => {
-  console.log(`[Relay] Health check server on port ${HEALTH_PORT}`);
+// Start the server
+server.listen(PORT, () => {
+  console.log(`[Relay] Server listening on port ${PORT}`);
+  console.log(`[Relay] Health check: http://localhost:${PORT}/health`);
+  console.log(`[Relay] WebSocket: ws://localhost:${PORT}/dictate`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('[Relay] SIGTERM received, closing connections...');
+  
+  // Close all sessions
+  sessions.forEach((session) => {
+    if (session.keepAliveInterval) {
+      clearInterval(session.keepAliveInterval);
+    }
+    if (session.deepgramWs) {
+      session.deepgramWs.close();
+    }
+  });
+  
   wss.close();
-  healthServer.close();
-  process.exit(0);
+  server.close(() => {
+    console.log('[Relay] Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('[Relay] SIGINT received');
+  process.emit('SIGTERM');
 });

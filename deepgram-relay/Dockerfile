@@ -1,5 +1,5 @@
 # Deepgram WebSocket Relay
-# For deployment on AWS App Runner or ECS/Fargate
+# Deployment: ECS Fargate + ALB
 
 FROM node:20-alpine
 
@@ -14,13 +14,12 @@ RUN npm ci --only=production
 # Copy application code
 COPY index.js ./
 
-# Expose ports
+# Single port for both health checks and WebSocket
 EXPOSE 8080
-EXPOSE 8081
 
-# Health check
+# Health check (same port as WebSocket)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
 # Run as non-root user
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
