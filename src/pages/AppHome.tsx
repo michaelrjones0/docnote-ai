@@ -8,7 +8,6 @@ import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
-import { DictationTextarea } from '@/components/ui/dictation-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
@@ -17,11 +16,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
-import { useEncounterTimings } from '@/hooks/useEncounterTimings';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
-import { DictationProvider } from '@/contexts/DictationContext';
-import { GlobalDictationButton, isDictationEnabled } from '@/components/GlobalDictationButton';
-import { EncounterTimingsDisplay } from '@/components/encounters/EncounterTimingsDisplay';
 
 // Format recording time as mm:ss or hh:mm:ss if over 1 hour
 function formatRecordingTime(ms: number): string {
@@ -77,14 +72,11 @@ const AppHome = () => {
   const [isStartingBatch, setIsStartingBatch] = useState(false);
   const [isGeneratingSoap, setIsGeneratingSoap] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [dictationScratchpad, setDictationScratchpad] = useState('');
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [pendingSignatureName, setPendingSignatureName] = useState('');
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
   const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
   const [showEndEncounterDialog, setShowEndEncounterDialog] = useState(false);
-  const [transcriptSource, setTranscriptSource] = useState<'live' | 'batch' | null>(null);
-  const [batchStatus, setBatchStatus] = useState<'idle' | 'starting' | 'transcribing' | 'ready' | 'error'>('idle');
   const { preferences, setPreferences } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
@@ -129,9 +121,6 @@ const AppHome = () => {
   const conflictBannerRef = useRef<HTMLDivElement>(null);
   const modeSwitchBannerRef = useRef<HTMLDivElement>(null);
 
-  // Timing instrumentation
-  const encounterTimings = useEncounterTimings();
-
   // Auto-scroll to conflict banner when it appears
   useEffect(() => {
     if (showConflictBanner && conflictBannerRef.current) {
@@ -151,15 +140,9 @@ const AppHome = () => {
       modeSwitchBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [preferences.noteEditorMode, getCurrentNoteType, getCurrentSoap, getCurrentSoap3]);
-  
   const liveScribe = useLiveScribe({
     onTranscriptUpdate: (transcript) => {
       setTranscriptText(transcript);
-      setTranscriptSource('live');
-      // Mark draft ready on first transcript update
-      if (transcript.trim() && !encounterTimings.timings.draftReadyAt) {
-        encounterTimings.markDraftReady();
-      }
       // Auto-scroll live transcript
       setTimeout(() => {
         if (liveTranscriptRef.current) {
@@ -183,246 +166,19 @@ const AppHome = () => {
   });
 
   const handleStartLiveScribe = async () => {
-    encounterTimings.markRecordingStarted();
     await liveScribe.startRecording();
   };
 
   const handleStopLiveScribe = async () => {
-    encounterTimings.markRecordingStopped();
     const finalTranscript = await liveScribe.stopRecording();
     
-    // Set live transcript as initial canonical source
+    // Auto-generate note if we have a transcript
     if (finalTranscript?.trim()) {
       setTranscriptText(finalTranscript);
-      setTranscriptSource('live');
-      encounterTimings.markDraftReady();
-    }
-    
-    // Start batch transcription in background (non-blocking) for quality upgrade
-    // User can immediately use live transcript to generate SOAP
-    const audioBytes = liveScribe.getEstimatedAudioBytes();
-    if (audioBytes > 20000) {
-      // Fire and forget - batch runs in background, doesn't block user
-      encounterTimings.markBatchStarted();
-      handleAutoBatchStart();
-    }
-    
-    // Show toast that transcript is ready for note generation
-    if (finalTranscript?.trim()) {
-      toast({
-        title: 'Recording complete',
-        description: 'Transcript ready. You can generate your note now.',
-      });
-    }
-  };
-
-  // Helper to convert Blob to base64
-  const blobToBase64 = async (blob: Blob): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const dataUrl = reader.result as string;
-        // Remove data URL prefix (e.g., "data:audio/wav;base64,")
-        const base64 = dataUrl.split(',')[1];
-        resolve(base64);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  };
-
-  // Auto-start batch transcription (called when recording stops)
-  // Uses deterministic WAV blob from this recording, not "latest audio" guesswork
-  const handleAutoBatchStart = async () => {
-    if (!session?.access_token) {
-      toast({
-        title: 'Authentication required',
-        description: 'Please log in to start batch transcription.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // Get the WAV blob from the recording
-    const wavBlob = liveScribe.getFullAudioBlob();
-    
-    if (!wavBlob) {
-      toast({
-        title: 'No audio recorded',
-        description: 'Recording produced no audio data.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const MIN_AUDIO_BYTES = 20_000;
-    if (wavBlob.size < MIN_AUDIO_BYTES) {
-      // Not enough audio for batch, just use live transcript
-      if (docSession.transcriptText?.trim()) {
-        toast({
-          title: 'Using live transcript',
-          description: 'Recording too short for batch processing.',
-        });
-      }
-      return;
-    }
-
-    setBatchStatus('starting');
-    setIsStartingBatch(true);
-
-    try {
-      // Convert WAV blob to base64
-      const audioBase64 = await blobToBase64(wavBlob);
-      
-      // PHI-safe logging
-      console.log('[AutoBatch] Starting with audio size:', wavBlob.size, 'bytes');
-
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-audio`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            audioBase64,
-            mimeType: 'audio/wav',
-          }),
-        }
-      );
-
-      const data = await response.json();
-      
-      if (data.ok && data.jobName) {
-        setJobName(data.jobName);
-        setBatchStatus('transcribing');
-        
-        toast({
-          title: 'Batch transcription started',
-          description: 'Processing audio for final transcript...',
-        });
-        
-        // Start polling for batch status
-        pollBatchStatus(data.jobName);
-      } else {
-        setBatchStatus('error');
-        toast({
-          title: 'Batch start failed',
-          description: data.error || 'Unknown error',
-          variant: 'destructive',
-        });
-      }
-    } catch (err) {
-      setBatchStatus('error');
-      toast({
-        title: 'Batch start failed',
-        description: String(err),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsStartingBatch(false);
-    }
-  };
-
-  // Poll for batch transcription status with exponential backoff
-  const pollBatchStatus = async (jobName: string, attempt = 0, startTime = Date.now()) => {
-    // Exponential backoff: 1s → 2s → 4s → 8s → max 15s
-    const getInterval = (n: number) => Math.min(1000 * Math.pow(2, n), 15000);
-    const MAX_POLL_DURATION_MS = 10 * 60 * 1000; // 10 minutes max
-    const elapsed = Date.now() - startTime;
-
-    if (elapsed >= MAX_POLL_DURATION_MS) {
-      // Don't error out, just stop polling - batch continues in background
-      setBatchStatus('transcribing'); // Keep as "still processing" 
-      console.log('[BatchPoll] Stopped after 10min. Batch may still complete.');
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcribe-audio-batch-status`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${session?.access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ jobName }),
-        }
-      );
-
-      const data = await response.json();
-      
-      // Check if transcript is ready
-      const text = (data?.text ?? data?.result?.text) ?? '';
-      if (typeof text === 'string' && text.trim()) {
-        // Show "refined transcript available" - don't auto-replace if user already has live
-        if (transcriptSource === 'live' && docSession.transcriptText?.trim()) {
-          // User already has live transcript - offer upgrade
-          setBatchStatus('ready');
-          toast({
-            title: 'Refined transcript ready',
-            description: 'Higher-quality batch transcript available. Click "Use Refined" to upgrade.',
-          });
-          // Store batch text for later use
-          batchTranscriptRef.current = text.trim();
-        } else {
-          // No live transcript yet, use batch directly
-          setTranscriptText(text.trim());
-          setTranscriptSource('batch');
-          setBatchStatus('ready');
-          toast({
-            title: 'Transcript ready',
-            description: 'Final transcript available.',
-          });
-        }
-        
-        // Log timing metadata if available
-        if (data?.meta?.timings) {
-          console.log('[BatchPoll] Completed with timings:', data.meta.timings);
-        }
-        return;
-      }
-      
-      // Check for NOT_FOUND or still processing
-      if (data?.status === 'NOT_FOUND' || data?.status === 'IN_PROGRESS') {
-        const interval = getInterval(attempt);
-        setTimeout(() => pollBatchStatus(jobName, attempt + 1, startTime), interval);
-        return;
-      }
-      
-      // Check for error/failure
-      if (data?.status === 'FAILED' || data?.error) {
-        setBatchStatus('error');
-        console.error('[BatchPoll] Failed:', data.error || data.failureReason);
-        // Don't toast - batch is background refinement, not blocking
-        return;
-      }
-      
-      // Unknown state, continue polling
-      const interval = getInterval(attempt);
-      setTimeout(() => pollBatchStatus(jobName, attempt + 1, startTime), interval);
-    } catch (err) {
-      // Network error, continue polling with backoff
-      const interval = getInterval(attempt);
-      setTimeout(() => pollBatchStatus(jobName, attempt + 1, startTime), interval);
-    }
-  };
-  
-  // Ref to store batch transcript for "Use Refined" flow
-  const batchTranscriptRef = useRef<string | null>(null);
-  
-  // Apply refined batch transcript
-  const handleUseRefinedTranscript = () => {
-    if (batchTranscriptRef.current) {
-      setTranscriptText(batchTranscriptRef.current);
-      setTranscriptSource('batch');
-      batchTranscriptRef.current = null;
-      toast({
-        title: 'Transcript upgraded',
-        description: 'Now using refined batch transcript.',
-      });
+      // Small delay to ensure state is updated
+      setTimeout(() => {
+        handleGenerateSoap();
+      }, 100);
     }
   };
 
@@ -509,8 +265,6 @@ const AppHome = () => {
       const text = (data?.text ?? data?.result?.text) ?? '';
       if (typeof text === 'string' && text.trim()) {
         setTranscriptText(text.trim());
-        setTranscriptSource('batch');
-        setBatchStatus('ready');
       }
     } catch (err) {
       setBatchStatusResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
@@ -519,83 +273,40 @@ const AppHome = () => {
     }
   };
 
-  // Manual batch start (fallback/retry) - also uses deterministic WAV blob
   const handleStartBatchLatest = async () => {
     if (!session?.access_token) {
       setStartBatchResult(JSON.stringify({ ok: false, error: 'No access token available' }, null, 2));
       return;
     }
 
-    // Get the WAV blob from the recording
-    const wavBlob = liveScribe.getFullAudioBlob();
-    
-    if (!wavBlob) {
-      toast({
-        title: 'No audio recorded',
-        description: 'No audio data available. Please record first.',
-        variant: 'destructive',
-      });
-      setStartBatchResult(JSON.stringify({ ok: false, error: 'No audio data available' }, null, 2));
-      return;
-    }
-
-    const MIN_AUDIO_BYTES = 20_000; // 20 KB minimum
-
-    // PHI-safe debug log: only sizes and format
-    console.log('[StartBatch] audioSizeBytes:', wavBlob.size);
-
-    if (wavBlob.size < MIN_AUDIO_BYTES) {
-      toast({
-        title: 'Insufficient audio',
-        description: `Recorded audio is too small (${wavBlob.size} bytes). Please record at least a few seconds of audio before starting batch transcription.`,
-        variant: 'destructive',
-      });
-      setStartBatchResult(JSON.stringify({ 
-        ok: false, 
-        error: `Insufficient audio: ${wavBlob.size} bytes < ${MIN_AUDIO_BYTES} bytes minimum`,
-        audioSizeBytes: wavBlob.size,
-      }, null, 2));
-      return;
-    }
-
     setIsStartingBatch(true);
     setStartBatchResult(null);
-    setBatchStatus('starting');
 
     try {
-      // Convert WAV blob to base64
-      const audioBase64 = await blobToBase64(wavBlob);
-
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-audio`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/start-batch-latest`,
         {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            audioBase64,
-            mimeType: 'audio/wav',
-          }),
         }
       );
 
       const data = await response.json();
       setStartBatchResult(JSON.stringify(data, null, 2));
       
-      // On success, auto-fill jobName and start polling
+      // On success, auto-fill jobName and trigger batch status check
       if (data.ok && data.jobName) {
         setJobName(data.jobName);
-        setBatchStatus('transcribing');
-        // Start polling for batch status
-        pollBatchStatus(data.jobName);
-      } else {
-        setBatchStatus('error');
+        // Wait a moment then trigger the batch status check
+        setTimeout(() => {
+          handleTestBatchStatus(data.jobName);
+        }, 500);
       }
     } catch (err) {
       setStartBatchResult(JSON.stringify({ ok: false, error: String(err) }, null, 2));
-      setBatchStatus('error');
     } finally {
       setIsStartingBatch(false);
     }
@@ -624,8 +335,6 @@ const AppHome = () => {
     setSignatureNeededMessage(false);
     // Always use the latest preferences from ref to avoid stale closure
     const expectedMode = currentPrefs.noteEditorMode;
-    const source = transcriptSource === 'batch' ? 'batch' : 'draft';
-    encounterTimings.markGenerateStarted(source);
 
     try {
       const { data, error } = await supabase.functions.invoke('generate-note', {
@@ -697,9 +406,8 @@ const AppHome = () => {
       });
     } finally {
       setIsGeneratingSoap(false);
-      encounterTimings.markGenerateCompleted();
     }
-  }, [docSession.transcriptText, handleNewGenerated, toast, transcriptSource, encounterTimings]);
+  }, [docSession.transcriptText, handleNewGenerated, toast]);
 
   // Handler for saving signature - sets flag for effect-based generation
   const handleSaveSignature = useCallback(() => {
@@ -751,10 +459,6 @@ const AppHome = () => {
       patientName: '', 
       patientGender: '' 
     });
-    
-    // Reset batch and transcript state
-    setTranscriptSource(null);
-    setBatchStatus('idle');
     
     // Close dialog
     setShowEndEncounterDialog(false);
@@ -864,8 +568,6 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
     setBatchStatusResult(null);
     setStartBatchResult(null);
     setAuthCheckResult(null);
-    setTranscriptSource(null);
-    setBatchStatus('idle');
     
     // Clear encounter-scoped patient fields from preferences (keep physician-scoped)
     setPreferences({ 
@@ -903,48 +605,30 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
   const showModeSwitchBanner = hasNote && currentNoteType !== preferences.noteEditorMode;
 
   return (
-    <DictationProvider>
-      <DemoModeGuard>
-        <DemoModeBanner />
-        <div className="min-h-screen bg-background p-4">
-          <div className="max-w-4xl mx-auto space-y-6">
-            {/* Header */}
-            <Card>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <CardTitle className="text-xl">DocNoteAI</CardTitle>
-                    {/* Global Dictation Button */}
-                    <GlobalDictationButton />
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <ResetDemoAckButton />
-                    <span className="text-sm text-muted-foreground">{user.email}</span>
-                    <Button onClick={handleClearSession} variant="outline" size="sm">
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Clear Session
-                    </Button>
-                    <Button onClick={handleLogout} variant="outline" size="sm">
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Log Out
-                    </Button>
-                  </div>
+    <DemoModeGuard>
+      <DemoModeBanner />
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* Header */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xl">DocNoteAI</CardTitle>
+                <div className="flex items-center gap-4">
+                  <ResetDemoAckButton />
+                  <span className="text-sm text-muted-foreground">{user.email}</span>
+                  <Button onClick={handleClearSession} variant="outline" size="sm">
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clear Session
+                  </Button>
+                  <Button onClick={handleLogout} variant="outline" size="sm">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Log Out
+                  </Button>
                 </div>
-              </CardHeader>
-            </Card>
-
-            {/* Dictation Scratchpad - for smoke testing global dictation */}
-            <Card>
-              <CardContent className="pt-4">
-                <DictationTextarea
-                  fieldId="dictation_scratchpad"
-                  label="Dictation Scratchpad"
-                  value={dictationScratchpad}
-                  onChange={(e) => setDictationScratchpad(e.target.value)}
-                  placeholder="Click here and use the global mic to test dictation..."
-                />
-              </CardContent>
-            </Card>
+              </div>
+            </CardHeader>
+          </Card>
 
         {/* Conflict Banner - now rendered inside SOAP Note section */}
 
@@ -1310,33 +994,17 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {liveScribe.error}
               </div>
             )}
-
-            {/* Timing Instrumentation Display */}
-            <EncounterTimingsDisplay 
-              timings={encounterTimings.timings}
-              formatTiming={encounterTimings.formatTiming}
-              batchStatus={batchStatus === 'transcribing' ? 'processing' : batchStatus === 'ready' ? 'completed' : batchStatus === 'error' ? 'failed' : 'idle'}
-            />
           </CardContent>
         </Card>
 
-        {/* Controls - Batch section collapsed by default, shown as fallback */}
+        {/* Controls */}
         <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Batch Transcription Controls</CardTitle>
-              <span className="text-xs text-muted-foreground">
-                {batchStatus === 'ready' ? '✓ Batch ready' : 'Manual fallback'}
-              </span>
-            </div>
+          <CardHeader>
+            <CardTitle className="text-lg">Batch Transcription Controls</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Batch transcription starts automatically when you stop recording. Use these controls only if auto-batch failed or you need to retry.
-            </p>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button onClick={handleTestAuth} disabled={isTestingAuth} variant="outline" size="sm">
+              <Button onClick={handleTestAuth} disabled={isTestingAuth}>
                 {isTestingAuth ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
@@ -1347,17 +1015,16 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
               
               <Button 
                 onClick={handleStartBatchLatest} 
-                disabled={isStartingBatch || batchStatus === 'transcribing' || !preferences.patientName.trim() || !preferences.patientGender} 
-                variant="outline"
-                size="sm"
-                title={(!preferences.patientName.trim() || !preferences.patientGender) ? 'Patient Name and Gender required' : 'Manually start batch transcription'}
+                disabled={isStartingBatch || !preferences.patientName.trim() || !preferences.patientGender} 
+                variant="secondary"
+                title={(!preferences.patientName.trim() || !preferences.patientGender) ? 'Patient Name and Gender required' : ''}
               >
-                {isStartingBatch || batchStatus === 'transcribing' ? (
+                {isStartingBatch ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                  <Play className="h-4 w-4 mr-2" />
                 )}
-                {batchStatus === 'error' ? 'Retry Batch' : 'Start Batch (Manual)'}
+                Start Batch (Latest Audio)
               </Button>
             </div>
 
@@ -1556,87 +1223,10 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </div>
 
             <div className="space-y-2">
-              {/* Batch Status Indicator */}
-              {batchStatus !== 'idle' && batchStatus !== 'ready' && (
-                <div className={`flex items-center gap-2 text-sm p-2 rounded-md ${
-                  batchStatus === 'starting' || batchStatus === 'transcribing' 
-                    ? 'bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400' 
-                    : 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400'
-                }`}>
-                  {batchStatus === 'starting' && (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Starting batch transcription...</span>
-                    </>
-                  )}
-                  {batchStatus === 'transcribing' && (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Transcribing audio (this may take a minute)...</span>
-                    </>
-                  )}
-                  {batchStatus === 'error' && (
-                    <>
-                      <AlertTriangle className="h-4 w-4" />
-                      <span>Batch transcription failed. Use "Start Batch" to retry.</span>
-                    </>
-                  )}
-                </div>
-              )}
-              
               {docSession.transcriptText && (
                 <div className="text-xs text-muted-foreground flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    Transcript source: 
-                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                      transcriptSource === 'batch' 
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-                    }`}>
-                      {transcriptSource === 'batch' ? 'Batch (final)' : 'Live (draft)'}
-                    </span>
-                    {/* Show upgrade buttons when batch is ready but still on live */}
-                    {batchStatus === 'ready' && transcriptSource === 'live' && batchTranscriptRef.current && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={handleUseRefinedTranscript}
-                          className="h-6 text-xs px-2 py-0 ml-2"
-                        >
-                          <RefreshCw className="h-3 w-3 mr-1" />
-                          Use Refined
-                        </Button>
-                        {hasNote && (
-                          <Button
-                            size="sm"
-                            variant="default"
-                            onClick={() => {
-                              // Apply refined transcript and regenerate note
-                              handleUseRefinedTranscript();
-                              // Delay to allow state to update
-                              setTimeout(() => handleGenerateSoap(), 100);
-                            }}
-                            disabled={isGeneratingSoap}
-                            className="h-6 text-xs px-2 py-0 ml-1"
-                          >
-                            {isGeneratingSoap ? (
-                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                            ) : (
-                              <FileText className="h-3 w-3 mr-1" />
-                            )}
-                            Regenerate Note
-                          </Button>
-                        )}
-                      </>
-                    )}
-                    {/* Show processing indicator */}
-                    {batchStatus === 'transcribing' && (
-                      <span className="flex items-center gap-1 ml-2 text-muted-foreground">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Refining...
-                      </span>
-                    )}
+                  <span>
+                    Using transcript from: <strong>{liveScribe.status !== 'idle' || liveScribe.transcript ? 'Live' : 'Batch'}</strong>
                   </span>
                   <span>{docSession.transcriptText.length} chars</span>
                 </div>
@@ -1763,46 +1353,62 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {/* Editable SOAP Cards - 4 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap-subjective"
-                      label="Subjective"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Subjective
+                      </Label>
+                      <SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap-subjective"
                       value={currentSoap.subjective || ''}
                       onChange={(e) => editSoapField('subjective', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap-objective"
-                      label="Objective"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Objective
+                      </Label>
+                      <SectionCopyButton text={currentSoap.objective || ''} sectionName="Objective" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap-objective"
                       value={currentSoap.objective || ''}
                       onChange={(e) => editSoapField('objective', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap.objective || ''} sectionName="Objective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap-assessment"
-                      label="Assessment"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Assessment
+                      </Label>
+                      <SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap-assessment"
                       value={currentSoap.assessment || ''}
                       onChange={(e) => editSoapField('assessment', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap-plan"
-                      label="Plan"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Plan
+                      </Label>
+                      <SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap-plan"
                       value={currentSoap.plan || ''}
                       onChange={(e) => editSoapField('plan', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />}
                     />
                   </div>
                 </div>
@@ -1841,35 +1447,47 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {/* Editable SOAP Cards - 3 Fields */}
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap3-subjective"
-                      label="Subjective"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap3-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Subjective
+                      </Label>
+                      <SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap3-subjective"
                       value={currentSoap3.subjective || ''}
                       onChange={(e) => editSoap3Field('subjective', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap3-objective"
-                      label="Objective"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap3-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Objective
+                      </Label>
+                      <SectionCopyButton text={currentSoap3.objective || ''} sectionName="Objective" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap3-objective"
                       value={currentSoap3.objective || ''}
                       onChange={(e) => editSoap3Field('objective', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap3.objective || ''} sectionName="Objective" />}
                     />
                   </div>
                   
                   <div className="border rounded-lg p-4 bg-card">
-                    <DictationTextarea
-                      fieldId="soap3-assessmentPlan"
-                      label="Assessment & Plan"
+                    <div className="flex items-center justify-between mb-2">
+                      <Label htmlFor="soap3-assessmentPlan" className="font-semibold text-sm text-primary uppercase tracking-wide">
+                        Assessment & Plan
+                      </Label>
+                      <SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />
+                    </div>
+                    <AutoResizeTextarea
+                      id="soap3-assessmentPlan"
                       value={currentSoap3.assessmentPlan || ''}
                       onChange={(e) => editSoap3Field('assessmentPlan', e.target.value)}
                       placeholder="Not documented."
-                      copyButton={<SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />}
                     />
                   </div>
                 </div>
@@ -1935,15 +1553,18 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
         {hasNote && (
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center gap-3">
-                <CardTitle className="text-lg">Patient Instructions</CardTitle>
-                <button
-                  onClick={handleOpenSignatureModal}
-                  className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 underline-offset-2 hover:underline"
-                >
-                  <Pencil className="h-3 w-3" />
-                  {preferences.clinicianDisplayName ? 'Edit signature' : 'Set signature'}
-                </button>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <CardTitle className="text-lg">Patient Instructions</CardTitle>
+                  <button
+                    onClick={handleOpenSignatureModal}
+                    className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 underline-offset-2 hover:underline"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    {preferences.clinicianDisplayName ? 'Edit signature' : 'Set signature'}
+                  </button>
+                </div>
+                <SectionCopyButton text={getPatientInstructions()} sectionName="Patient Instructions" />
               </div>
             </CardHeader>
             <CardContent>
@@ -1960,14 +1581,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 </div>
               )}
               <div className="border rounded-lg p-4 bg-card">
-                <DictationTextarea
-                  fieldId="patient-instructions"
-                  label="Patient Instructions"
+                <AutoResizeTextarea
+                  id="patient-instructions"
                   value={getPatientInstructions()}
                   onChange={(e) => editPatientInstructions(e.target.value)}
                   placeholder="Patient instructions will be generated here. This is a plain-language letter summarizing the visit for the patient."
                   className="min-h-[120px]"
-                  copyButton={<SectionCopyButton text={getPatientInstructions()} sectionName="Patient Instructions" />}
                 />
               </div>
               {!getPatientInstructions() && !signatureNeededMessage && (
@@ -2068,7 +1687,6 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
         </div>
       </div>
     </DemoModeGuard>
-    </DictationProvider>
   );
 };
 

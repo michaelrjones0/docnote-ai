@@ -26,9 +26,3 @@ verify_jwt = false
 
 [functions.update-visit-summary]
 verify_jwt = false
-
-[functions.transcribe-stream-start]
-verify_jwt = false
-
-[functions.deepgram-token]
-verify_jwt = false

@@ -237,7 +237,6 @@ async function getMedicalTranscriptionJobStatus(
 
 
 serve(async (req) => {
-  const requestStartTime = Date.now();
   const origin = req.headers.get('Origin');
   const { headers: corsHeaders, isAllowed: originAllowed } = getCorsHeaders(origin);
 
@@ -260,9 +259,6 @@ serve(async (req) => {
     return authResult.error;
   }
 
-  // Timing instrumentation
-  const timings: Record<string, number> = {};
-
   try {
     const { jobName } = await req.json();
     
@@ -276,25 +272,26 @@ serve(async (req) => {
     // Get validated AWS configuration
     const awsConfig = getAwsConfig();
 
-    // Get job status with timing
-    const statusStartTime = Date.now();
+    // SECURITY: Do not log userId or job names
+
     const jobStatus = await getMedicalTranscriptionJobStatus(
       jobName,
       awsConfig.accessKeyId,
       awsConfig.secretAccessKey,
       awsConfig.region
     );
-    timings.getStatusMs = Date.now() - statusStartTime;
+
+    // SECURITY: Do not log job status
 
     if (jobStatus.status === 'COMPLETED') {
       // Fetch transcript from S3 using SigV4-signed GetObject request
-      // Use env-driven config - never hardcode bucket/region
-      const s3Bucket = awsConfig.s3Bucket;
-      const s3Region = awsConfig.region;
-      const s3Key = `${awsConfig.s3Prefix}batch-output/${jobName}.json`;
+      const s3Bucket = 'apollohealth-transcription-us-west-2';
+      const s3Region = 'us-west-2';
+      const s3Key = `transcribe/batch-output/${jobName}.json`;
       const s3Url = `https://${s3Bucket}.s3.${s3Region}.amazonaws.com/${s3Key}`;
 
-      const s3StartTime = Date.now();
+      // SECURITY: Do not log S3 paths
+
       const s3Headers = await signRequest(
         'GET',
         s3Url,
@@ -310,7 +307,6 @@ serve(async (req) => {
         method: 'GET',
         headers: s3Headers,
       });
-      timings.s3FetchMs = Date.now() - s3StartTime;
 
       const responseStatus = transcriptResponse.status;
       const responseStatusText = transcriptResponse.statusText;
@@ -319,15 +315,13 @@ serve(async (req) => {
 
       // Handle 404 / not found
       if (responseStatus === 404 || responseStatus === 403) {
-        timings.totalMs = Date.now() - requestStartTime;
         return new Response(
           JSON.stringify({ 
             ok: false,
             status: 'NOT_FOUND',
             error: `Transcript file not found in S3: ${s3Key}`,
             httpStatus: responseStatus,
-            httpStatusText: responseStatusText,
-            meta: { timings }
+            httpStatusText: responseStatusText
           }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
@@ -337,7 +331,7 @@ serve(async (req) => {
       const isJson = contentType.includes('application/json') || raw.trim().startsWith('{');
       
       if (!transcriptResponse.ok || !isJson) {
-        timings.totalMs = Date.now() - requestStartTime;
+        // Return structured error for non-JSON or failed responses
         return new Response(
           JSON.stringify({ 
             ok: false,
@@ -346,61 +340,48 @@ serve(async (req) => {
             statusText: responseStatusText,
             contentType,
             rawSnippet: raw.slice(0, 500),
-            meta: { timings }
+            url: s3Url
           }),
           { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       
-      const parseStartTime = Date.now();
       const transcriptData = JSON.parse(raw);
       const parsed = parseTranscriptWithSpeakers(transcriptData);
-      timings.parseMs = Date.now() - parseStartTime;
-      timings.totalMs = Date.now() - requestStartTime;
 
       return new Response(
         JSON.stringify({ 
           status: 'COMPLETED',
           jobName,
           text: parsed.text,
-          segments: parsed.segments,
-          meta: {
-            timings,
-            textLength: parsed.text.length,
-            segmentsCount: parsed.segments.length,
-            awsRegion: awsConfig.region,
-          }
+          segments: parsed.segments
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     } else if (jobStatus.status === 'FAILED') {
-      timings.totalMs = Date.now() - requestStartTime;
       return new Response(
         JSON.stringify({ 
           status: 'FAILED',
           jobName,
-          error: jobStatus.failureReason || 'Transcription job failed',
-          meta: { timings }
+          error: jobStatus.failureReason || 'Transcription job failed'
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     } else {
-      timings.totalMs = Date.now() - requestStartTime;
       return new Response(
         JSON.stringify({ 
           status: jobStatus.status,
-          jobName,
-          meta: { timings }
+          jobName
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
   } catch (error) {
-    timings.totalMs = Date.now() - requestStartTime;
+    // SECURITY: Do not log error details
     console.error('[transcribe-audio-batch-status] Internal error');
     return new Response(
-      JSON.stringify({ error: 'An unexpected error occurred', meta: { timings } }),
+      JSON.stringify({ error: 'An unexpected error occurred' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
