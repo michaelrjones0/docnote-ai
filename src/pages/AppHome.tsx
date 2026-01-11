@@ -18,6 +18,7 @@ import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientG
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { useHybridLiveScribe } from '@/hooks/useHybridLiveScribe';
 import { useBrowserLiveTranscript } from '@/hooks/useBrowserLiveTranscript';
+import { useLiveTranscriptEngine } from '@/hooks/useLiveTranscriptEngine';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 import { SettingsSheet } from '@/components/SettingsSheet';
 
@@ -201,12 +202,24 @@ const AppHome = () => {
   // Browser SpeechRecognition for immediate visual feedback - fallback when Deepgram streaming unavailable
   const browserTranscript = useBrowserLiveTranscript();
   
-  // Use Deepgram partials for live display when streaming is available, otherwise browser STT
-  const useDgPartialsForDisplay = isStreamingAvailable;
+  // Engine selection logic with debug toggle support
+  const {
+    engineState,
+    shouldUseDeepgramForDisplay,
+    shouldUseBrowserForDisplay,
+    isDebugForced,
+  } = useLiveTranscriptEngine({
+    deepgramReady: hybridLiveScribe.status === 'recording',
+    deepgramConnecting: hybridLiveScribe.status === 'connecting',
+    deepgramError: hybridLiveScribe.status === 'error',
+    browserListening: browserTranscript.isListening,
+    browserSupported: browserTranscript.isSupported,
+    isRecording: liveScribe.status === 'recording' || liveScribe.status === 'connecting',
+  });
 
   const handleStartLiveScribe = async () => {
-    // Start browser-based immediate transcript (for visual feedback) only if not using Deepgram streaming
-    if (!useDgPartialsForDisplay && browserTranscript.isSupported) {
+    // Start browser-based immediate transcript if using browser engine
+    if (shouldUseBrowserForDisplay && browserTranscript.isSupported) {
       browserTranscript.startListening();
     }
     // Start actual backend transcription
@@ -215,7 +228,7 @@ const AppHome = () => {
 
   const handleStopLiveScribe = async () => {
     // Stop browser transcript immediately (only if we were using it)
-    if (!useDgPartialsForDisplay) {
+    if (shouldUseBrowserForDisplay) {
       browserTranscript.stopListening();
     }
     
@@ -952,31 +965,56 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             {/* Live Transcript Display - show during recording, paused, or if transcript exists */}
             {(liveScribe.status === 'recording' || liveScribe.status === 'paused' || liveScribe.transcript || browserTranscript.finalText) && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  Live Transcript
-                  {liveScribe.status === 'paused' && <span className="text-xs text-muted-foreground">(paused)</span>}
-                  {/* Show Deepgram streaming indicator when using it */}
-                  {useDgPartialsForDisplay && liveScribe.status === 'recording' && (
-                    <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      Deepgram STT
-                    </span>
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium flex items-center gap-2">
+                    Live Transcript
+                    {liveScribe.status === 'paused' && <span className="text-xs text-muted-foreground">(paused)</span>}
+                  </Label>
+                  
+                  {/* Engine Indicator - always visible during recording */}
+                  {(liveScribe.status === 'recording' || liveScribe.status === 'connecting') && (
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-mono px-2 py-0.5 rounded ${
+                        engineState.status === 'ready' 
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                          : engineState.status === 'connecting'
+                          ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                          : engineState.status === 'fallback'
+                          ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                          : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {engineState.status === 'ready' && (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-1.5" />
+                        )}
+                        {engineState.status === 'connecting' && (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse mr-1.5" />
+                        )}
+                        {engineState.label}
+                      </span>
+                      {isDebugForced && (
+                        <span className="text-xs text-purple-600 dark:text-purple-400 font-mono">
+                          [DEBUG]
+                        </span>
+                      )}
+                    </div>
                   )}
-                  {/* Show Browser STT indicator when using fallback */}
-                  {!useDgPartialsForDisplay && browserTranscript.isListening && (
-                    <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                      Browser STT
-                    </span>
-                  )}
-                </Label>
+                </div>
+                
+                {/* Fallback Warning Banner */}
+                {engineState.fallbackWarning && (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-orange-100 dark:bg-orange-900/20 text-orange-800 dark:text-orange-300 rounded-md text-xs">
+                    <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                    <span>{engineState.fallbackWarning}</span>
+                  </div>
+                )}
+                
                 <pre 
                   ref={liveTranscriptRef}
                   className="bg-muted p-4 rounded-md text-sm overflow-auto max-h-48 whitespace-pre-wrap font-mono border"
                 >
                   {/* During recording: show live transcript with interim text in grey */}
                   {liveScribe.status === 'recording' ? (
-                    useDgPartialsForDisplay ? (
+                    shouldUseDeepgramForDisplay ? (
                       /* Deepgram streaming: show final + partial */
                       <>
                         {hybridLiveScribe.transcript || ''}
@@ -985,8 +1023,8 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                         )}
                         {!hybridLiveScribe.transcript && !hybridLiveScribe.partialTranscript && 'Listening...'}
                       </>
-                    ) : (
-                      /* Browser fallback: show browser transcript */
+                    ) : shouldUseBrowserForDisplay ? (
+                      /* Browser STT: show browser transcript */
                       <>
                         {browserTranscript.finalText || ''}
                         {browserTranscript.interimText && (
@@ -994,14 +1032,19 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                         )}
                         {!browserTranscript.finalText && !browserTranscript.interimText && 'Listening...'}
                       </>
+                    ) : (
+                      /* Chunked backend: show accumulated transcript */
+                      <>
+                        {liveScribe.transcript || 'Transcribing...'}
+                      </>
                     )
                   ) : (
                     /* When stopped: show backend transcript (used for note generation) */
                     liveScribe.transcript || (liveScribe.status === 'paused' ? 'Paused...' : '')
                   )}
                 </pre>
-                {/* Show backend transcript count when different from displayed */}
-                {liveScribe.status === 'recording' && !useDgPartialsForDisplay && liveScribe.transcript && (
+                {/* Show backend transcript count when using browser display */}
+                {liveScribe.status === 'recording' && shouldUseBrowserForDisplay && liveScribe.transcript && (
                   <p className="text-xs text-muted-foreground">
                     Backend transcript: {liveScribe.transcript.length} chars
                   </p>
