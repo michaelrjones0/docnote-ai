@@ -16,6 +16,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
+import { useHybridLiveScribe } from '@/hooks/useHybridLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
 import { SettingsSheet } from '@/components/SettingsSheet';
 
@@ -141,10 +142,13 @@ const AppHome = () => {
       modeSwitchBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [preferences.noteEditorMode, getCurrentNoteType, getCurrentSoap, getCurrentSoap3]);
-  const liveScribe = useLiveScribe({
+  // Check if Deepgram streaming is available
+  const isStreamingAvailable = Boolean(import.meta.env.VITE_DEEPGRAM_RELAY_URL);
+  
+  // Hybrid Live Scribe (Deepgram streaming) - used when relay is configured
+  const hybridLiveScribe = useHybridLiveScribe({
     onTranscriptUpdate: (transcript) => {
       setTranscriptText(transcript);
-      // Auto-scroll live transcript
       setTimeout(() => {
         if (liveTranscriptRef.current) {
           liveTranscriptRef.current.scrollTop = liveTranscriptRef.current.scrollHeight;
@@ -161,10 +165,37 @@ const AppHome = () => {
         variant: 'destructive',
       });
     },
-    chunkIntervalMs: 10000, // Send chunks every 10 seconds
     liveDraftMode: docSession.liveDraftMode,
     preferences,
   });
+
+  // Fallback batch-based Live Scribe - used when streaming is not available
+  const batchLiveScribe = useLiveScribe({
+    onTranscriptUpdate: (transcript) => {
+      setTranscriptText(transcript);
+      setTimeout(() => {
+        if (liveTranscriptRef.current) {
+          liveTranscriptRef.current.scrollTop = liveTranscriptRef.current.scrollHeight;
+        }
+      }, 50);
+    },
+    onSummaryUpdate: (summary) => {
+      setRunningSummary(summary);
+    },
+    onError: (err) => {
+      toast({
+        title: 'Live Scribe Error',
+        description: err,
+        variant: 'destructive',
+      });
+    },
+    chunkIntervalMs: 10000,
+    liveDraftMode: docSession.liveDraftMode,
+    preferences,
+  });
+
+  // Unified liveScribe interface - use streaming when available, otherwise batch
+  const liveScribe = isStreamingAvailable ? hybridLiveScribe : batchLiveScribe;
 
   const handleStartLiveScribe = async () => {
     await liveScribe.startRecording();
