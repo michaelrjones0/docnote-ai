@@ -166,7 +166,9 @@ wss.on('connection', (clientWs, req) => {
     startTime: null,
     connectionTimeout: null,
     keepAliveInterval: null,
+    flushTimeout: null,
     isStopping: false,
+    doneSent: false,
   };
   
   sessions.set(sessionId, session);
@@ -274,19 +276,28 @@ wss.on('connection', (clientWs, req) => {
       stopKeepAlive();
       session.deepgramWs = null;
       
-      // If we were stopping, send done message
-      if (session.isStopping) {
+      // Clear flush timeout since Deepgram closed on its own
+      if (session.flushTimeout) {
+        clearTimeout(session.flushTimeout);
+        session.flushTimeout = null;
+      }
+      
+      // If we were stopping, send done message (if not already sent)
+      if (session.isStopping && !session.doneSent) {
+        session.doneSent = true;
         const duration = Date.now() - (session.startTime || Date.now());
-        clientWs.send(JSON.stringify({
-          type: 'done',
-          stats: {
-            durationMs: duration,
-            audioBytesSent: session.audioBytesSent,
-            partialCount: session.partialCount,
-            finalCount: session.finalCount,
-            finalTranscriptLength: session.finalTranscriptLength,
-          },
-        }));
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(JSON.stringify({
+            type: 'done',
+            stats: {
+              durationMs: duration,
+              audioBytesSent: session.audioBytesSent,
+              partialCount: session.partialCount,
+              finalCount: session.finalCount,
+              finalTranscriptLength: session.finalTranscriptLength,
+            },
+          }));
+        }
       }
     });
     
@@ -356,32 +367,59 @@ wss.on('connection', (clientWs, req) => {
         // Stop KeepAlive
         stopKeepAlive();
         
+        // Helper to send done message (only once)
+        const sendDone = () => {
+          if (session.doneSent) return;
+          session.doneSent = true;
+          
+          // Clear flush timeout if still pending
+          if (session.flushTimeout) {
+            clearTimeout(session.flushTimeout);
+            session.flushTimeout = null;
+          }
+          
+          if (clientWs.readyState === WebSocket.OPEN) {
+            clientWs.send(JSON.stringify({
+              type: 'done',
+              stats: {
+                durationMs: Date.now() - (session.startTime || Date.now()),
+                audioBytesSent: session.audioBytesSent,
+                partialCount: session.partialCount,
+                finalCount: session.finalCount,
+                finalTranscriptLength: session.finalTranscriptLength,
+              },
+            }));
+          }
+        };
+        
         // Send CloseStream to Deepgram to flush final results
         if (session.deepgramWs?.readyState === WebSocket.OPEN) {
           try {
             session.deepgramWs.send(JSON.stringify({ type: 'CloseStream' }));
+            console.log(`[${sessionId}] CloseStream sent, waiting for flush...`);
           } catch (err) {
             console.error(`[${sessionId}] CloseStream send failed`);
           }
           
-          // Give Deepgram time to flush, then close
-          setTimeout(() => {
+          // Start flush timer (2500ms) - if Deepgram hasn't closed by then, force close
+          session.flushTimeout = setTimeout(() => {
+            console.log(`[${sessionId}] Flush timeout expired, closing Deepgram`);
+            session.flushTimeout = null;
+            
             if (session.deepgramWs) {
               session.deepgramWs.close();
+              session.deepgramWs = null;
             }
-          }, 1000);
+            
+            sendDone();
+          }, 2500);
+          
+          // Also handle Deepgram closing on its own (the 'close' handler will call sendDone)
+          // The dgWs.on('close') handler already exists and will trigger when Deepgram closes
+          
         } else {
           // No Deepgram connection, send done immediately
-          clientWs.send(JSON.stringify({
-            type: 'done',
-            stats: {
-              durationMs: Date.now() - (session.startTime || Date.now()),
-              audioBytesSent: session.audioBytesSent,
-              partialCount: session.partialCount,
-              finalCount: session.finalCount,
-              finalTranscriptLength: session.finalTranscriptLength,
-            },
-          }));
+          sendDone();
         }
         
       } else if (msg.type === 'ping') {
@@ -403,6 +441,11 @@ wss.on('connection', (clientWs, req) => {
     // Cleanup
     clearTimeout(session.connectionTimeout);
     stopKeepAlive();
+    
+    if (session.flushTimeout) {
+      clearTimeout(session.flushTimeout);
+      session.flushTimeout = null;
+    }
     
     if (session.deepgramWs) {
       session.deepgramWs.close();
@@ -430,6 +473,9 @@ process.on('SIGTERM', () => {
   sessions.forEach((session) => {
     if (session.keepAliveInterval) {
       clearInterval(session.keepAliveInterval);
+    }
+    if (session.flushTimeout) {
+      clearTimeout(session.flushTimeout);
     }
     if (session.deepgramWs) {
       session.deepgramWs.close();
