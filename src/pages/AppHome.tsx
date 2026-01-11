@@ -10,13 +10,14 @@ import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Settings, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
 import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { DemoModeGuard, DemoModeBanner, ResetDemoAckButton } from '@/components/DemoModeGuard';
+import { SettingsSheet } from '@/components/SettingsSheet';
 
 // Format recording time as mm:ss or hh:mm:ss if over 1 hour
 function formatRecordingTime(ms: number): string {
@@ -617,6 +618,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 <div className="flex items-center gap-4">
                   <ResetDemoAckButton />
                   <span className="text-sm text-muted-foreground">{user.email}</span>
+                  <SettingsSheet preferences={preferences} setPreferences={setPreferences} />
                   <Button onClick={handleClearSession} variant="outline" size="sm">
                     <Trash2 className="h-4 w-4 mr-2" />
                     Clear Session
@@ -1069,158 +1071,6 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 {batchStatusResult}
               </pre>
             )}
-
-            {/* Physician Preferences Panel */}
-            <div className="border rounded-lg p-4 bg-muted/30">
-              <div className="flex items-center gap-2 mb-4">
-                <Settings className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium text-sm">Physician Preferences</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="noteEditorMode" className="text-sm">Editor Mode</Label>
-                  <Select
-                    value={preferences.noteEditorMode}
-                    onValueChange={(value: NoteEditorMode) => 
-                      setPreferences({ noteEditorMode: value })
-                    }
-                  >
-                    <SelectTrigger id="noteEditorMode">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="SOAP_4_FIELD">SOAP (4 fields: S / O / A / P)</SelectItem>
-                      <SelectItem value="SOAP_3_FIELD">SOAP (3 fields: S / O / A&P combined)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="noteStructure" className="text-sm">Note Structure</Label>
-                  <Select
-                    value={preferences.noteStructure}
-                    onValueChange={(value: 'SOAP' | 'Problem-Oriented') => 
-                      setPreferences({ noteStructure: value })
-                    }
-                  >
-                    <SelectTrigger id="noteStructure">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="SOAP">SOAP</SelectItem>
-                      <SelectItem value="Problem-Oriented">Problem-Oriented</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="detailLevel" className="text-sm">Detail Level</Label>
-                  <Select
-                    value={preferences.detailLevel}
-                    onValueChange={(value: 'Brief' | 'Standard' | 'Detailed') => 
-                      setPreferences({ detailLevel: value })
-                    }
-                  >
-                    <SelectTrigger id="detailLevel">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Brief">Brief</SelectItem>
-                      <SelectItem value="Standard">Standard</SelectItem>
-                      <SelectItem value="Detailed">Detailed</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="planFormat" className="text-sm">Plan Format</Label>
-                  <Select
-                    value={preferences.planFormat}
-                    onValueChange={(value: 'Bullets' | 'Paragraph') => 
-                      setPreferences({ planFormat: value })
-                    }
-                  >
-                    <SelectTrigger id="planFormat">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Bullets">Bullets</SelectItem>
-                      <SelectItem value="Paragraph">Paragraph</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="firstPerson" className="text-sm cursor-pointer">
-                    First-person clinician voice
-                  </Label>
-                  <Switch
-                    id="firstPerson"
-                    checked={preferences.firstPerson}
-                    onCheckedChange={(checked) => setPreferences({ firstPerson: checked })}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="patientQuotes" className="text-sm cursor-pointer">
-                    Include patient quotes
-                  </Label>
-                  <Switch
-                    id="patientQuotes"
-                    checked={preferences.patientQuotes}
-                    onCheckedChange={(checked) => setPreferences({ patientQuotes: checked })}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="assessmentProblemList" className="text-sm cursor-pointer">
-                    Assessment as problem list
-                  </Label>
-                  <Switch
-                    id="assessmentProblemList"
-                    checked={preferences.assessmentProblemList}
-                    onCheckedChange={(checked) => setPreferences({ assessmentProblemList: checked })}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="includeFollowUpLine" className="text-sm cursor-pointer">
-                    Plan includes follow-up line
-                  </Label>
-                  <Switch
-                    id="includeFollowUpLine"
-                    checked={preferences.includeFollowUpLine}
-                    onCheckedChange={(checked) => setPreferences({ includeFollowUpLine: checked })}
-                  />
-                </div>
-              </div>
-
-              {/* Patient Instructions Settings */}
-              <div className="mt-4 pt-4 border-t border-border">
-                <Label className="text-sm font-medium mb-3 block">Patient Instructions Settings</Label>
-                <div className="space-y-2">
-                  <Label htmlFor="clinicianDisplayName" className="text-sm">Clinician Name (for signature)</Label>
-                  <Input
-                    id="clinicianDisplayName"
-                    value={preferences.clinicianDisplayName}
-                    onChange={(e) => setPreferences({ clinicianDisplayName: e.target.value })}
-                    placeholder="e.g., Dr. Jane Smith"
-                    className="text-sm max-w-md"
-                  />
-                </div>
-              </div>
-              
-              {/* Custom Style Instructions */}
-              <div className="mt-4 space-y-2">
-                <Label htmlFor="styleText" className="text-sm">My style preferences (optional)</Label>
-                <AutoResizeTextarea
-                  id="styleText"
-                  value={preferences.styleText}
-                  onChange={(e) => setPreferences({ styleText: e.target.value })}
-                  placeholder="Examples:
-• Keep assessment as problem list, no sentences.
-• Plan should include return precautions when mentioned.
-• Avoid filler like 'patient presents today'."
-                  className="min-h-[80px] text-sm"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Style only. Cannot add facts not in transcript. ({preferences.styleText.length}/600)
-                </p>
-              </div>
-            </div>
 
             <div className="space-y-2">
               {docSession.transcriptText && (
