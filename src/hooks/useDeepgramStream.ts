@@ -29,6 +29,7 @@ export interface DeepgramStreamMetrics {
 
 interface UseDeepgramStreamOptions {
   relayUrl: string;
+  onReady?: () => void;
   onPartialTranscript?: (text: string) => void;
   onFinalTranscript?: (text: string) => void;
   onError?: (error: string) => void;
@@ -40,7 +41,7 @@ const BUFFER_SIZE = 4096;
 const SEND_INTERVAL_MS = 100; // Send audio every 100ms
 
 export function useDeepgramStream(options: UseDeepgramStreamOptions) {
-  const { relayUrl, onPartialTranscript, onFinalTranscript, onError } = options;
+  const { relayUrl, onReady, onPartialTranscript, onFinalTranscript, onError } = options;
   
   const [status, setStatus] = useState<DeepgramStreamStatus>('idle');
   const [transcript, setTranscript] = useState('');
@@ -259,6 +260,9 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
               const connectionTime = Date.now() - (connectStartRef.current || Date.now());
               metricsRef.current.connectionTimeMs = connectionTime;
               safeLog(`[DeepgramStream] Ready in ${connectionTime}ms, starting audio capture`);
+              
+              // Fire onReady callback for parent to know connection succeeded
+              onReady?.();
               
               // Start audio capture
               await startAudioCapture();

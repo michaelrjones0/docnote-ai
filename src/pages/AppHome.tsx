@@ -148,6 +148,11 @@ const AppHome = () => {
   const deepgramRelayUrl = import.meta.env.VITE_DEEPGRAM_RELAY_URL || '';
   const isStreamingAvailable = Boolean(deepgramRelayUrl);
   
+  // Track Deepgram connection state for fallback logic
+  const [deepgramConnected, setDeepgramConnected] = useState(false);
+  const [deepgramFailed, setDeepgramFailed] = useState(false);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Hybrid Live Scribe (Deepgram streaming) - used when relay is configured
   const hybridLiveScribe = useHybridLiveScribe({
     onTranscriptUpdate: (transcript) => {
@@ -161,7 +166,32 @@ const AppHome = () => {
     onSummaryUpdate: (summary) => {
       setRunningSummary(summary);
     },
+    onReady: () => {
+      // Deepgram relay connected successfully - clear timeout and mark connected
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
+      setDeepgramConnected(true);
+      setDeepgramFailed(false);
+      console.log('[LiveTranscript] Deepgram relay ready (onReady event)');
+    },
     onError: (err) => {
+      // Deepgram failed - clear timeout and trigger fallback
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
+      setDeepgramFailed(true);
+      setDeepgramConnected(false);
+      console.warn('[LiveTranscript] Deepgram relay error (onError event):', err);
+      
+      // Start browser fallback
+      if (browserTranscript.isSupported) {
+        console.log('[LiveTranscript] Starting Browser STT fallback');
+        browserTranscript.startListening();
+      }
+      
       toast({
         title: 'Live Scribe Error',
         description: err,
@@ -227,37 +257,35 @@ const AppHome = () => {
     return 'none';
   })();
 
-  // Track Deepgram connection state for fallback logic
-  const [deepgramConnected, setDeepgramConnected] = useState(false);
-  const [deepgramFailed, setDeepgramFailed] = useState(false);
-  
   const handleStartLiveScribe = async () => {
     // Reset Deepgram connection state
     setDeepgramConnected(false);
     setDeepgramFailed(false);
+    
+    // Clear any existing connection timeout
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     
     // If Deepgram is available, try it first (primary engine)
     if (isStreamingAvailable) {
       // PHI-safe log: connection attempt
       console.log(`[LiveTranscript] Attempting Deepgram relay connection to: ${deepgramRelayUrl}/dictate`);
       
-      // Start Deepgram streaming - will set connection state via callbacks
-      await liveScribe.startRecording();
-      
-      // Check if Deepgram connected successfully after a brief delay
-      setTimeout(() => {
-        if (hybridLiveScribe.status === 'recording') {
-          setDeepgramConnected(true);
-          console.log('[LiveTranscript] Deepgram relay connected successfully');
-        } else if (hybridLiveScribe.status === 'error') {
+      // Set up 5-second connection timeout - if no onReady arrives, fallback to browser
+      connectionTimeoutRef.current = setTimeout(() => {
+        if (!deepgramConnected && !deepgramFailed) {
+          console.warn('[LiveTranscript] Deepgram relay connection timeout (5s), falling back to Browser STT');
           setDeepgramFailed(true);
-          console.warn('[LiveTranscript] Deepgram relay failed, falling back to Browser STT');
-          // Start browser fallback
           if (browserTranscript.isSupported) {
             browserTranscript.startListening();
           }
         }
-      }, 1500);
+      }, 5000);
+      
+      // Start Deepgram streaming - onReady callback will clear timeout if successful
+      await liveScribe.startRecording();
     } else {
       // No Deepgram configured - use browser STT directly
       console.log('[LiveTranscript] No Deepgram relay configured, using Browser STT');
@@ -269,6 +297,12 @@ const AppHome = () => {
   };
 
   const handleStopLiveScribe = async () => {
+    // Clear connection timeout if still pending
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
+    
     // Stop browser transcript (always stop it, might have been fallback)
     browserTranscript.stopListening();
     
@@ -284,6 +318,15 @@ const AppHome = () => {
       }, 100);
     }
   };
+  
+  // Cleanup connection timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isLoading && !user) {
