@@ -66,8 +66,18 @@ export function isAllowedOrigin(origin: string | null): boolean {
     return true;
   }
   
-  // Lovable preview domains: https://*.lovable.app
-  if (/^https:\/\/[a-zA-Z0-9-]+\.lovable\.app$/.test(origin)) {
+  // Lovable preview domains: https://*.lovable.app (including id-preview--* pattern)
+  if (/^https:\/\/[a-zA-Z0-9_-]+\.lovable\.app$/.test(origin)) {
+    return true;
+  }
+  
+  // Lovable preview domains with complex subdomains: https://id-preview--*.lovable.app
+  if (/^https:\/\/id-preview--[a-zA-Z0-9-]+\.lovable\.app$/.test(origin)) {
+    return true;
+  }
+  
+  // Lovable project domains: https://*.lovableproject.com
+  if (/^https:\/\/[a-zA-Z0-9_-]+\.lovableproject\.com$/.test(origin)) {
     return true;
   }
   
