@@ -294,6 +294,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_access_patient: { Args: { _patient_id: string }; Returns: boolean }
       generate_mrn: { Args: never; Returns: string }
       has_any_role: { Args: { _user_id: string }; Returns: boolean }
       has_role: {
