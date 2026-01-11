@@ -29,6 +29,22 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean);
 
+// Deepgram configuration with punctuation and smart formatting
+const DEEPGRAM_CONFIG = {
+  model: 'nova-2-medical',
+  language: 'en-US',
+  encoding: 'linear16',
+  sample_rate: 16000,
+  channels: 1,
+  punctuate: true,
+  smart_format: true,
+  interim_results: true,
+  endpointing: 300,
+};
+
+// KeepAlive interval to prevent Deepgram idle timeout (8 seconds)
+const KEEPALIVE_INTERVAL_MS = 8000;
+
 // Validate required environment variables
 if (!DEEPGRAM_API_KEY) {
   console.error('[FATAL] DEEPGRAM_API_KEY is required');
