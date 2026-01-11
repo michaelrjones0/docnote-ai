@@ -77,6 +77,10 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
   const stopStartRef = useRef<number | null>(null);
   const recordingStartRef = useRef<number | null>(null);
   
+  // Stop resolver ref - resolves stopRecording() promise when 'done' message arrives
+  const stopResolveRef = useRef<((transcript: string) => void) | null>(null);
+  const stopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Recording timer state
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -137,6 +141,12 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
    * Cleanup all resources
    */
   const cleanup = useCallback(() => {
+    // Clear stop timeout
+    if (stopTimeoutRef.current) {
+      clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = null;
+    }
+    
     // Stop timer
     if (timerIntervalRef.current) {
       clearInterval(timerIntervalRef.current);
@@ -177,6 +187,7 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
     }
     
     pcmBufferRef.current = [];
+    stopResolveRef.current = null;
   }, []);
 
   /**
@@ -277,6 +288,18 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
                 metricsRef.current.stopToFinalTranscriptMs = Date.now() - stopStartRef.current;
               }
               setMetrics({ ...metricsRef.current });
+              
+              // Resolve the stopRecording promise if waiting
+              if (stopResolveRef.current) {
+                const resolver = stopResolveRef.current;
+                stopResolveRef.current = null;
+                if (stopTimeoutRef.current) {
+                  clearTimeout(stopTimeoutRef.current);
+                  stopTimeoutRef.current = null;
+                }
+                resolver(accumulatedTranscriptRef.current);
+              }
+              
               cleanup();
               setStatus('done');
               break;
@@ -433,29 +456,23 @@ export function useDeepgramStream(options: UseDeepgramStreamOptions) {
       wsRef.current.send(JSON.stringify({ type: 'stop' }));
     }
     
-    // Wait for 'done' message (with timeout)
-    return new Promise((resolve) => {
-      let resolved = false;
-      const timeout = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
+    // Return promise that resolves on 'done' message or timeout
+    return new Promise<string>((resolve) => {
+      // Store the resolver - will be called from onmessage when 'done' arrives
+      stopResolveRef.current = resolve;
+      
+      // Fallback timeout (4 seconds) - resolves with current transcript if 'done' never arrives
+      stopTimeoutRef.current = setTimeout(() => {
+        if (stopResolveRef.current) {
           safeWarn('[DeepgramStream] Stop timeout, using current transcript');
+          const resolver = stopResolveRef.current;
+          stopResolveRef.current = null;
+          stopTimeoutRef.current = null;
           cleanup();
           setStatus('done');
-          resolve(accumulatedTranscriptRef.current);
+          resolver(accumulatedTranscriptRef.current);
         }
-      }, 3000);
-      
-      const checkDone = setInterval(() => {
-        if (wsRef.current === null) {
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timeout);
-            clearInterval(checkDone);
-            resolve(accumulatedTranscriptRef.current);
-          }
-        }
-      }, 100);
+      }, 4000);
     });
   }, [status, sendAudioBuffer, cleanup]);
 
