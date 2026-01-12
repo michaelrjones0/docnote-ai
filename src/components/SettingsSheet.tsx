@@ -9,8 +9,8 @@ import { Switch } from '@/components/ui/switch';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { Settings, Loader2, KeyRound, FileText } from 'lucide-react';
-import { PhysicianPreferences, NoteEditorMode } from '@/hooks/usePhysicianPreferences';
+import { Settings, Loader2, KeyRound, FileText, ClipboardList, RotateCcw } from 'lucide-react';
+import { PhysicianPreferences, NoteEditorMode, DEFAULT_NORMAL_PHYSICAL_TEMPLATE } from '@/hooks/usePhysicianPreferences';
 
 interface SettingsSheetProps {
   preferences: PhysicianPreferences;
@@ -260,6 +260,46 @@ export function SettingsSheet({ preferences, setPreferences }: SettingsSheetProp
                   Style only. Cannot add facts not in transcript. ({preferences.styleText.length}/600)
                 </p>
               </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          {/* Templates Section */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-4 w-4 text-muted-foreground" />
+              <h3 className="font-medium">Templates</h3>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="normalPhysicalTemplate" className="text-sm">
+                  Normal Physical Exam Template
+                </Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setPreferences({ normalPhysicalTemplate: DEFAULT_NORMAL_PHYSICAL_TEMPLATE })}
+                >
+                  <RotateCcw className="h-3 w-3 mr-1" />
+                  Reset
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Used when no physical exam findings are mentioned in the transcript
+              </p>
+              <AutoResizeTextarea
+                id="normalPhysicalTemplate"
+                value={preferences.normalPhysicalTemplate}
+                onChange={(e) => setPreferences({ normalPhysicalTemplate: e.target.value })}
+                placeholder="Enter your normal physical exam template..."
+                className="min-h-[120px] text-sm font-mono"
+              />
+              <p className="text-xs text-muted-foreground">
+                {preferences.normalPhysicalTemplate.length}/1000 characters
+              </p>
             </div>
           </div>
 

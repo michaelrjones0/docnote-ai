@@ -18,10 +18,22 @@ export interface PhysicianPreferences {
   // Required patient info for current encounter
   patientName: string;
   patientGender: PatientGender | '';
+  // Templates
+  normalPhysicalTemplate: string;
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
 const MAX_STYLE_TEXT_LENGTH = 600;
+const MAX_TEMPLATE_LENGTH = 1000;
+
+export const DEFAULT_NORMAL_PHYSICAL_TEMPLATE = `General: NAD, well-appearing.
+HEENT: Normocephalic, atraumatic. PERRL, EOMI. TMs clear. Oropharynx clear.
+Neck: Supple, no lymphadenopathy.
+CV: RRR, no murmurs, rubs, or gallops.
+Lungs: CTA bilaterally, no wheezes, rales, or rhonchi.
+Abdomen: Soft, non-tender, non-distended, normoactive bowel sounds.
+Extremities: No edema, cyanosis, or clubbing. Full ROM.
+Neuro: Alert and oriented x3. CN II-XII intact. Normal gait.`;
 
 // Helper to get pronouns based on gender
 export const getPronounSet = (gender: PatientGender | ''): { subject: string; object: string; possessive: string } => {
@@ -50,6 +62,7 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   clinicianDisplayName: '',
   patientName: '',
   patientGender: '',
+  normalPhysicalTemplate: DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -81,6 +94,9 @@ const loadPreferences = (): PhysicianPreferences => {
         clinicianDisplayName: typeof parsed.clinicianDisplayName === 'string' ? parsed.clinicianDisplayName : '',
         patientName: typeof parsed.patientName === 'string' ? parsed.patientName : '',
         patientGender: ['male', 'female', 'other'].includes(parsed.patientGender) ? parsed.patientGender : '',
+        normalPhysicalTemplate: typeof parsed.normalPhysicalTemplate === 'string' 
+          ? parsed.normalPhysicalTemplate.slice(0, MAX_TEMPLATE_LENGTH) 
+          : DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
       };
     }
   } catch (e) {
@@ -111,6 +127,10 @@ export const usePhysicianPreferences = () => {
       // Enforce max length on styleText
       if (newPrefs.styleText.length > MAX_STYLE_TEXT_LENGTH) {
         newPrefs.styleText = newPrefs.styleText.slice(0, MAX_STYLE_TEXT_LENGTH);
+      }
+      // Enforce max length on normalPhysicalTemplate
+      if (newPrefs.normalPhysicalTemplate.length > MAX_TEMPLATE_LENGTH) {
+        newPrefs.normalPhysicalTemplate = newPrefs.normalPhysicalTemplate.slice(0, MAX_TEMPLATE_LENGTH);
       }
       savePreferences(newPrefs);
       return newPrefs;
