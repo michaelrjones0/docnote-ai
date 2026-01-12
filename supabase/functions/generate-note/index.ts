@@ -50,6 +50,7 @@ interface Preferences {
   clinicianDisplayName: string;
   patientName: string;
   patientGender: PatientGender;
+  normalPhysicalTemplate: string;
 }
 
 // Get pronoun set for consistent language
@@ -64,6 +65,15 @@ const getPronounSet = (gender: PatientGender): { subject: string; object: string
       return { subject: 'they', object: 'them', possessive: 'their', reflexive: 'themselves' };
   }
 };
+
+const DEFAULT_NORMAL_PHYSICAL_TEMPLATE = `General: NAD, well-appearing.
+HEENT: Normocephalic, atraumatic. PERRL, EOMI. TMs clear. Oropharynx clear.
+Neck: Supple, no lymphadenopathy.
+CV: RRR, no murmurs, rubs, or gallops.
+Lungs: CTA bilaterally, no wheezes, rales, or rhonchi.
+Abdomen: Soft, non-tender, non-distended, normoactive bowel sounds.
+Extremities: No edema, cyanosis, or clubbing. Full ROM.
+Neuro: Alert and oriented x3. CN II-XII intact. Normal gait.`;
 
 const validatePreferences = (prefs: any): Preferences => {
   return {
@@ -88,6 +98,9 @@ const validatePreferences = (prefs: any): Preferences => {
     clinicianDisplayName: typeof prefs?.clinicianDisplayName === 'string' ? prefs.clinicianDisplayName.trim() : '',
     patientName: typeof prefs?.patientName === 'string' ? prefs.patientName.trim() : '',
     patientGender: ['male', 'female', 'other'].includes(prefs?.patientGender) ? prefs.patientGender : '',
+    normalPhysicalTemplate: typeof prefs?.normalPhysicalTemplate === 'string' 
+      ? prefs.normalPhysicalTemplate.slice(0, 1000) 
+      : DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
   };
 };
 
@@ -171,11 +184,11 @@ ${preferenceInstructions}
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct.
 
-2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
-   - Do NOT invent or hallucinate objective data.
-   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
-   - Do NOT write plausible-sounding exam findings that are not in the transcript.
-   - Only include objective data that is EXPLICITLY stated in the transcript.
+2. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
+   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
+   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   - If the transcript DOES include specific objective findings (vitals, physical exam findings, labs/imaging results, measurements), document ONLY what is explicitly stated.
+   - Do NOT invent additional exam findings beyond the template or stated findings.
 
 3. ASSESSMENT:
    - State the clinical problem(s)/diagnosis(es).
@@ -203,7 +216,7 @@ ${preferenceInstructions}
 {
   "soap": {
     "subjective": "string",
-    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
+    "objective": "string - exam findings from transcript OR Normal Physical template if none mentioned",
     "assessment": "string",
     "plan": "string"
   },
@@ -242,11 +255,11 @@ ${preferenceInstructions}
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct.
 
-2. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
-   - Do NOT invent or hallucinate objective data.
-   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
-   - Do NOT write plausible-sounding exam findings that are not in the transcript.
-   - Only include objective data that is EXPLICITLY stated in the transcript.
+2. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
+   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
+   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   - If the transcript DOES include specific objective findings (vitals, physical exam findings, labs/imaging results, measurements), document ONLY what is explicitly stated.
+   - Do NOT invent additional exam findings beyond the template or stated findings.
 
 3. ASSESSMENT & PLAN (COMBINED - PROBLEM-ORIENTED):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
@@ -282,7 +295,7 @@ ${preferenceInstructions}
 {
   "soap3": {
     "subjective": "string",
-    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
+    "objective": "string - exam findings from transcript OR Normal Physical template if none mentioned",
     "assessmentPlan": "string - formatted problem-oriented A/P"
   },
   "ap": [
@@ -327,11 +340,11 @@ ${preferenceInstructions}
    - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
-3. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
-   - Do NOT invent or hallucinate objective data.
-   - If the transcript does NOT explicitly include objective findings (vitals, physical exam findings, labs/imaging results, measurements), you MUST set objective to exactly: "Not documented."
-   - If objective findings ARE present, organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.) using ONLY stated findings.
-   - Do NOT write plausible-sounding exam findings that are not in the transcript.
+3. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
+   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
+   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   - If the transcript DOES include specific objective findings, organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.) using ONLY stated findings.
+   - Do NOT invent additional exam findings beyond the template or stated findings.
 
 4. ASSESSMENT (Problem-Oriented Format):
    - Create a NUMBERED problem list with clinical impression for each.
@@ -356,7 +369,7 @@ ${preferenceInstructions}
 {
   "soap": {
     "subjective": "string - full subjective content (problem-oriented format)",
-    "objective": "string - exam findings OR 'Not documented.' if none in transcript",
+    "objective": "string - exam findings from transcript OR Normal Physical template if none mentioned",
     "assessment": "string - problem list or clinical narrative",
     "plan": "string - plan items"
   },
@@ -399,10 +412,11 @@ ${preferenceInstructions}
    - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
-3. OBJECTIVE SAFETY RULE - THIS IS CRITICAL AND NON-NEGOTIABLE:
-   - Do NOT invent or hallucinate objective data.
-   - If the transcript does NOT explicitly include objective findings, you MUST set objective to exactly: "Not documented."
-   - If objective findings ARE present, organize by system using ONLY stated findings.
+3. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
+   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
+   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   - If the transcript DOES include specific objective findings, organize by system using ONLY stated findings.
+   - Do NOT invent additional exam findings beyond the template or stated findings.
 
 4. ASSESSMENT & PLAN (Combined, Problem-Oriented Format):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
@@ -431,7 +445,7 @@ ${preferenceInstructions}
 {
   "soap3": {
     "subjective": "string - problem-oriented subjective",
-    "objective": "string - exam findings OR 'Not documented.'",
+    "objective": "string - exam findings from transcript OR Normal Physical template if none mentioned",
     "assessmentPlan": "string - problem-oriented A/P"
   },
   "ap": [
