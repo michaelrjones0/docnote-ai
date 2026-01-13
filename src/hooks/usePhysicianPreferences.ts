@@ -3,6 +3,12 @@ import { useState, useEffect, useCallback } from 'react';
 export type NoteEditorMode = 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
 export type PatientGender = 'male' | 'female' | 'other';
 
+export interface PhysicalExamTemplate {
+  id: string;
+  name: string;
+  content: string;
+}
+
 export interface PhysicianPreferences {
   noteStructure: 'SOAP' | 'Problem-Oriented';
   detailLevel: 'Brief' | 'Standard' | 'Detailed';
@@ -18,13 +24,19 @@ export interface PhysicianPreferences {
   // Required patient info for current encounter
   patientName: string;
   patientGender: PatientGender | '';
-  // Templates
+  // Templates - legacy single template (kept for backwards compatibility)
   normalPhysicalTemplate: string;
+  // Multi-template system
+  physicalExamTemplates: PhysicalExamTemplate[];
+  defaultPhysicalExamTemplateId: string;
+  // Per-encounter template selection (stored in session, not preferences)
+  selectedPhysicalExamTemplateId?: string;
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
 const MAX_STYLE_TEXT_LENGTH = 600;
-const MAX_TEMPLATE_LENGTH = 1000;
+const MAX_TEMPLATE_LENGTH = 2000;
+const MAX_TEMPLATES = 10;
 
 export const DEFAULT_NORMAL_PHYSICAL_TEMPLATE = `General: NAD, well-appearing.
 HEENT: Normocephalic, atraumatic. PERRL, EOMI. TMs clear. Oropharynx clear.
@@ -48,6 +60,19 @@ export const getPronounSet = (gender: PatientGender | ''): { subject: string; ob
   }
 };
 
+// Generate a unique ID for templates
+const generateTemplateId = (): string => {
+  return `tpl_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
+const getDefaultPhysicalExamTemplates = (): PhysicalExamTemplate[] => [
+  {
+    id: 'default_general',
+    name: 'General / Family Medicine',
+    content: DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
+  },
+];
+
 const getDefaultPreferences = (): PhysicianPreferences => ({
   noteStructure: 'SOAP',
   detailLevel: 'Standard',
@@ -63,6 +88,8 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   patientName: '',
   patientGender: '',
   normalPhysicalTemplate: DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
+  physicalExamTemplates: getDefaultPhysicalExamTemplates(),
+  defaultPhysicalExamTemplateId: 'default_general',
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -70,6 +97,30 @@ const loadPreferences = (): PhysicianPreferences => {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
+      
+      // Parse physical exam templates array
+      let physicalExamTemplates: PhysicalExamTemplate[] = getDefaultPhysicalExamTemplates();
+      if (Array.isArray(parsed.physicalExamTemplates) && parsed.physicalExamTemplates.length > 0) {
+        physicalExamTemplates = parsed.physicalExamTemplates
+          .filter((t: any) => t && typeof t.id === 'string' && typeof t.name === 'string' && typeof t.content === 'string')
+          .slice(0, MAX_TEMPLATES)
+          .map((t: any) => ({
+            id: t.id,
+            name: t.name.slice(0, 100),
+            content: t.content.slice(0, MAX_TEMPLATE_LENGTH),
+          }));
+        // Ensure at least one template exists
+        if (physicalExamTemplates.length === 0) {
+          physicalExamTemplates = getDefaultPhysicalExamTemplates();
+        }
+      }
+      
+      // Validate defaultPhysicalExamTemplateId
+      let defaultPhysicalExamTemplateId = parsed.defaultPhysicalExamTemplateId;
+      if (!physicalExamTemplates.some(t => t.id === defaultPhysicalExamTemplateId)) {
+        defaultPhysicalExamTemplateId = physicalExamTemplates[0]?.id || 'default_general';
+      }
+      
       return {
         noteStructure: ['SOAP', 'Problem-Oriented'].includes(parsed.noteStructure)
           ? parsed.noteStructure
@@ -97,6 +148,8 @@ const loadPreferences = (): PhysicianPreferences => {
         normalPhysicalTemplate: typeof parsed.normalPhysicalTemplate === 'string' 
           ? parsed.normalPhysicalTemplate.slice(0, MAX_TEMPLATE_LENGTH) 
           : DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
+        physicalExamTemplates,
+        defaultPhysicalExamTemplateId,
       };
     }
   } catch (e) {
@@ -132,10 +185,99 @@ export const usePhysicianPreferences = () => {
       if (newPrefs.normalPhysicalTemplate.length > MAX_TEMPLATE_LENGTH) {
         newPrefs.normalPhysicalTemplate = newPrefs.normalPhysicalTemplate.slice(0, MAX_TEMPLATE_LENGTH);
       }
+      // Enforce max templates count
+      if (newPrefs.physicalExamTemplates.length > MAX_TEMPLATES) {
+        newPrefs.physicalExamTemplates = newPrefs.physicalExamTemplates.slice(0, MAX_TEMPLATES);
+      }
+      // Enforce max length on each template
+      newPrefs.physicalExamTemplates = newPrefs.physicalExamTemplates.map(t => ({
+        ...t,
+        name: t.name.slice(0, 100),
+        content: t.content.slice(0, MAX_TEMPLATE_LENGTH),
+      }));
       savePreferences(newPrefs);
       return newPrefs;
     });
   }, []);
+
+  const addTemplate = useCallback((name: string, content: string) => {
+    setPreferencesState(prev => {
+      if (prev.physicalExamTemplates.length >= MAX_TEMPLATES) {
+        return prev;
+      }
+      const newTemplate: PhysicalExamTemplate = {
+        id: generateTemplateId(),
+        name: name.slice(0, 100),
+        content: content.slice(0, MAX_TEMPLATE_LENGTH),
+      };
+      const newPrefs = {
+        ...prev,
+        physicalExamTemplates: [...prev.physicalExamTemplates, newTemplate],
+      };
+      savePreferences(newPrefs);
+      return newPrefs;
+    });
+  }, []);
+
+  const updateTemplate = useCallback((id: string, updates: Partial<Omit<PhysicalExamTemplate, 'id'>>) => {
+    setPreferencesState(prev => {
+      const newPrefs = {
+        ...prev,
+        physicalExamTemplates: prev.physicalExamTemplates.map(t =>
+          t.id === id
+            ? {
+                ...t,
+                ...(updates.name !== undefined ? { name: updates.name.slice(0, 100) } : {}),
+                ...(updates.content !== undefined ? { content: updates.content.slice(0, MAX_TEMPLATE_LENGTH) } : {}),
+              }
+            : t
+        ),
+      };
+      savePreferences(newPrefs);
+      return newPrefs;
+    });
+  }, []);
+
+  const deleteTemplate = useCallback((id: string) => {
+    setPreferencesState(prev => {
+      // Don't allow deleting the last template
+      if (prev.physicalExamTemplates.length <= 1) {
+        return prev;
+      }
+      const newTemplates = prev.physicalExamTemplates.filter(t => t.id !== id);
+      let newDefaultId = prev.defaultPhysicalExamTemplateId;
+      // If we deleted the default, set a new default
+      if (prev.defaultPhysicalExamTemplateId === id) {
+        newDefaultId = newTemplates[0]?.id || '';
+      }
+      const newPrefs = {
+        ...prev,
+        physicalExamTemplates: newTemplates,
+        defaultPhysicalExamTemplateId: newDefaultId,
+      };
+      savePreferences(newPrefs);
+      return newPrefs;
+    });
+  }, []);
+
+  const setDefaultTemplate = useCallback((id: string) => {
+    setPreferencesState(prev => {
+      if (!prev.physicalExamTemplates.some(t => t.id === id)) {
+        return prev;
+      }
+      const newPrefs = {
+        ...prev,
+        defaultPhysicalExamTemplateId: id,
+      };
+      savePreferences(newPrefs);
+      return newPrefs;
+    });
+  }, []);
+
+  const getActiveTemplate = useCallback((): PhysicalExamTemplate | null => {
+    const activeId = preferences.selectedPhysicalExamTemplateId || preferences.defaultPhysicalExamTemplateId;
+    return preferences.physicalExamTemplates.find(t => t.id === activeId) || preferences.physicalExamTemplates[0] || null;
+  }, [preferences]);
 
   const resetPreferences = useCallback(() => {
     const defaults = getDefaultPreferences();
@@ -147,5 +289,11 @@ export const usePhysicianPreferences = () => {
     preferences,
     setPreferences,
     resetPreferences,
+    // Template management
+    addTemplate,
+    updateTemplate,
+    deleteTemplate,
+    setDefaultTemplate,
+    getActiveTemplate,
   };
 };
