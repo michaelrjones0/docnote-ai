@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
+import { RichSoapTextarea } from '@/components/ui/rich-soap-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
@@ -1488,11 +1489,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </Label>
                       <SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />
                     </div>
-                    <AutoResizeTextarea
+                    <RichSoapTextarea
                       id="soap-subjective"
                       value={currentSoap.subjective || ''}
                       onChange={(e) => editSoapField('subjective', e.target.value)}
                       placeholder="Not documented."
+                      enableRichDisplay={true}
                     />
                   </div>
                   
@@ -1582,11 +1584,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </Label>
                       <SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />
                     </div>
-                    <AutoResizeTextarea
+                    <RichSoapTextarea
                       id="soap3-subjective"
                       value={currentSoap3.subjective || ''}
                       onChange={(e) => editSoap3Field('subjective', e.target.value)}
                       placeholder="Not documented."
+                      enableRichDisplay={true}
                     />
                   </div>
                   
