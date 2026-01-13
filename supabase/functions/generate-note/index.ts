@@ -188,11 +188,23 @@ ${preferenceInstructions}
 
 ## CRITICAL INSTRUCTIONS:
 
-1. SUBJECTIVE:
-   - Summarize the patient's reported symptoms and history of present illness.
+1. SUBJECTIVE (Problem-Compartmentalized Format):
+   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
+   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CONSISTENT FORMAT for EVERY note:
+     
+     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
+     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only]
+     
+     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
+     [Patient's story for THIS complaint only]
+   
+   - If only ONE complaint exists, still use the bold+underlined header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct.
+   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - Be concise and direct within each complaint section.
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -269,11 +281,23 @@ ${preferenceInstructions}
 
 ## CRITICAL INSTRUCTIONS:
 
-1. SUBJECTIVE:
-   - Summarize the patient's reported symptoms and history of present illness.
+1. SUBJECTIVE (Problem-Compartmentalized Format):
+   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
+   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CONSISTENT FORMAT for EVERY note:
+     
+     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
+     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only]
+     
+     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
+     [Patient's story for THIS complaint only]
+   
+   - If only ONE complaint exists, still use the bold+underlined header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct.
+   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - Be concise and direct within each complaint section.
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -364,11 +388,21 @@ ${preferenceInstructions}
    - Only include information explicitly present in the transcript.
    - Do NOT invent or extrapolate clinical information.
 
-2. SUBJECTIVE (Problem-Oriented Format):
-   - If multiple problems are evident in the transcript, organize by problem headings.
-   - If only one problem, use a single concise paragraph.
-   - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
-   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+2. SUBJECTIVE (Problem-Compartmentalized Format):
+   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
+   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CONSISTENT FORMAT for EVERY note:
+     
+     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
+     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only - ${detailSentences} sentences]
+     
+     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
+     [Patient's story for THIS complaint only - ${detailSentences} sentences]
+   
+   - If only ONE complaint exists, still use the bold+underlined header format.
+   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful, under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -446,11 +480,21 @@ ${preferenceInstructions}
    - Only include information explicitly present in the transcript.
    - Do NOT invent or extrapolate clinical information.
 
-2. SUBJECTIVE (Problem-Oriented Format):
-   - If multiple problems are evident in the transcript, organize by problem headings.
-   - If only one problem, use a single concise paragraph.
-   - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
-   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+2. SUBJECTIVE (Problem-Compartmentalized Format):
+   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
+   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CONSISTENT FORMAT for EVERY note:
+     
+     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
+     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only - ${detailSentences} sentences]
+     
+     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
+     [Patient's story for THIS complaint only - ${detailSentences} sentences]
+   
+   - If only ONE complaint exists, still use the bold+underlined header format.
+   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful, under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
