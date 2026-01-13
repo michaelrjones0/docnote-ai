@@ -1520,11 +1520,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </Label>
                       <SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />
                     </div>
-                    <AutoResizeTextarea
+                    <RichSoapTextarea
                       id="soap-assessment"
                       value={currentSoap.assessment || ''}
                       onChange={(e) => editSoapField('assessment', e.target.value)}
                       placeholder="Not documented."
+                      enableRichDisplay={true}
                     />
                   </div>
                   
@@ -1535,11 +1536,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </Label>
                       <SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />
                     </div>
-                    <AutoResizeTextarea
+                    <RichSoapTextarea
                       id="soap-plan"
                       value={currentSoap.plan || ''}
                       onChange={(e) => editSoapField('plan', e.target.value)}
                       placeholder="Not documented."
+                      enableRichDisplay={true}
                     />
                   </div>
                 </div>
@@ -1615,11 +1617,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </Label>
                       <SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />
                     </div>
-                    <AutoResizeTextarea
+                    <RichSoapTextarea
                       id="soap3-assessmentPlan"
                       value={currentSoap3.assessmentPlan || ''}
                       onChange={(e) => editSoap3Field('assessmentPlan', e.target.value)}
                       placeholder="Not documented."
+                      enableRichDisplay={true}
                     />
                   </div>
                 </div>
