@@ -44,6 +44,7 @@ interface Preferences {
   patientQuotes: boolean;
   styleText: string;
   assessmentProblemList: boolean;
+  assessmentPlanNumbered: boolean;
   includeFollowUpLine: boolean;
   noteEditorMode: 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
   patientFirstName: string;
@@ -99,6 +100,7 @@ const validatePreferences = (prefs: any): Preferences => {
     patientQuotes: typeof prefs?.patientQuotes === 'boolean' ? prefs.patientQuotes : true,
     styleText: typeof prefs?.styleText === 'string' ? prefs.styleText.slice(0, 600) : '',
     assessmentProblemList: typeof prefs?.assessmentProblemList === 'boolean' ? prefs.assessmentProblemList : true,
+    assessmentPlanNumbered: typeof prefs?.assessmentPlanNumbered === 'boolean' ? prefs.assessmentPlanNumbered : false,
     includeFollowUpLine: typeof prefs?.includeFollowUpLine === 'boolean' ? prefs.includeFollowUpLine : true,
     noteEditorMode: ['SOAP_4_FIELD', 'SOAP_3_FIELD'].includes(prefs?.noteEditorMode)
       ? prefs.noteEditorMode
@@ -190,16 +192,16 @@ ${preferenceInstructions}
 
 1. SUBJECTIVE (Problem-Compartmentalized Format):
    - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
+   - Format EACH complaint header in Title Case (capitalize first letter of each word) followed by a colon: Complaint Name:
    - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
    - Keep each problem's narrative compartmentalized - do not mix information between problems.
    - CONSISTENT FORMAT for EVERY note:
      
-     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
+     Low Back Pain: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
      
-     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
+     Headaches: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
    
-   - If only ONE complaint exists, still use the ALL CAPS header format.
+   - If only ONE complaint exists, still use the Title Case header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct within each complaint section.
@@ -222,21 +224,22 @@ ${preferenceInstructions}
 
 3. ASSESSMENT (Problem-Compartmentalized Format):
    - State the clinical problem(s)/diagnosis(es).
-   ${prefs.assessmentProblemList ? '- Format as a numbered problem list.' : '- Write as clinical narrative.'}
-   - Format EACH problem header in ALL CAPS followed by a colon: PROBLEM NAME:
+   ${prefs.assessmentProblemList ? (prefs.assessmentPlanNumbered ? '- Format as a numbered problem list (1., 2., 3., etc.).' : '- Format as a problem list with bullet points.') : '- Write as clinical narrative.'}
+   - Format EACH problem header in Title Case followed by a colon: Problem Name:
    - Immediately after the header, write the clinical impression for THAT specific problem on the SAME LINE.
    - BAD: "I am assessing the patient for..." or "The assessment is that..."
-   - GOOD: "HYPERTENSION: Uncontrolled, likely due to medication non-adherence."
-   - GOOD: "ACUTE LOW BACK PAIN: Likely musculoskeletal strain without radiculopathy."
+   - GOOD: "Hypertension: Uncontrolled, likely due to medication non-adherence."
+   - GOOD: "Acute Low Back Pain: Likely musculoskeletal strain without radiculopathy."
 
 4. PLAN (Problem-Compartmentalized Format):
    - State what will be done for each problem.
-   - Format EACH problem header in ALL CAPS followed by a colon: PROBLEM NAME:
+   - Format EACH problem header in Title Case followed by a colon: Problem Name:
    - Immediately after the header, list the plan items for THAT specific problem.
-   ${prefs.planFormat === 'Bullets' ? '- Format plan items as bullet list with "- " prefix after the header line.' : '- Write the plan as a flowing paragraph after the header.'}
+   ${prefs.planFormat === 'Bullets' ? (prefs.assessmentPlanNumbered ? '- Format plan items as numbered list (1., 2., 3., etc.) after the header line.' : '- Format plan items as bullet list with "- " prefix after the header line.') : '- Write the plan as a flowing paragraph after the header.'}
    - Use active voice.
-   - GOOD: "HYPERTENSION:\\n- Increase lisinopril to 20mg daily\\n- Recheck BP in 2 weeks"
-   - GOOD: "ACUTE LOW BACK PAIN:\\n- NSAIDs as needed for pain\\n- Physical therapy referral"
+   ${prefs.assessmentPlanNumbered 
+     ? '- GOOD: "Hypertension:\\n1. Increase lisinopril to 20mg daily\\n2. Recheck BP in 2 weeks"\\n- GOOD: "Acute Low Back Pain:\\n1. NSAIDs as needed for pain\\n2. Physical therapy referral"' 
+     : '- GOOD: "Hypertension:\\n- Increase lisinopril to 20mg daily\\n- Recheck BP in 2 weeks"\\n- GOOD: "Acute Low Back Pain:\\n- NSAIDs as needed for pain\\n- Physical therapy referral"'}
    ${prefs.includeFollowUpLine ? '- End with follow-up timing if mentioned, otherwise "Follow up as needed."' : ''}
 
 5. PATIENT INSTRUCTIONS (patientInstructions):
@@ -288,16 +291,16 @@ ${preferenceInstructions}
 
 1. SUBJECTIVE (Problem-Compartmentalized Format):
    - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
+   - Format EACH complaint header in Title Case (capitalize first letter of each word) followed by a colon: Complaint Name:
    - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
    - Keep each problem's narrative compartmentalized - do not mix information between problems.
    - CONSISTENT FORMAT for EVERY note:
      
-     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
+     Low Back Pain: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
      
-     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
+     Headaches: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
    
-   - If only ONE complaint exists, still use the ALL CAPS header format.
+   - If only ONE complaint exists, still use the Title Case header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct within each complaint section.
@@ -321,23 +324,25 @@ ${preferenceInstructions}
 3. ASSESSMENT & PLAN (COMBINED - PROBLEM-ORIENTED):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
    - The "assessmentPlan" field must be generated FROM the "ap" array entries.
-   - Format EACH problem header in ALL CAPS followed by a colon.
+   - Format EACH problem header in Title Case followed by a colon.
+   ${prefs.assessmentPlanNumbered ? '- Use numbered lists (1., 2., 3., etc.) for plan items.' : '- Use bullet points (- ) for plan items.'}
    - Format assessmentPlan as:
-     PROBLEM NAME:
+     Problem Name:
      Assessment: <one sentence clinical assessment>
      Plan:
-     - bullet item
-     - bullet item
+     ${prefs.assessmentPlanNumbered ? '1. plan item\\n     2. plan item' : '- bullet item\\n     - bullet item'}
      
-     NEXT PROBLEM NAME:
+     Next Problem Name:
      Assessment: <one sentence clinical assessment>
      Plan:
-     - bullet item
+     ${prefs.assessmentPlanNumbered ? '1. plan item' : '- bullet item'}
    
    - If only ONE problem exists, still format the same way with one entry.
    - Do NOT merge multiple problems into one generic plan.
    - BAD: "I am assessing the patient for..."
-   - GOOD: "HYPERTENSION:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"
+   ${prefs.assessmentPlanNumbered 
+     ? '- GOOD: "Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n1. Increase lisinopril to 20mg daily"' 
+     : '- GOOD: "Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"'}
 
 4. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.

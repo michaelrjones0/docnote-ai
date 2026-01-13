@@ -247,6 +247,17 @@ export function SettingsSheet({
                     onCheckedChange={(checked) => setPreferences({ includeFollowUpLine: checked })}
                   />
                 </div>
+
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="assessmentPlanNumbered" className="text-sm cursor-pointer">
+                    Numbered bullets in A&P
+                  </Label>
+                  <Switch
+                    id="assessmentPlanNumbered"
+                    checked={preferences.assessmentPlanNumbered}
+                    onCheckedChange={(checked) => setPreferences({ assessmentPlanNumbered: checked })}
+                  />
+                </div>
               </div>
 
               <Separator />
