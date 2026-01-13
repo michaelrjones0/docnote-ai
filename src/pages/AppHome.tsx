@@ -482,12 +482,21 @@ const AppHome = () => {
     // Always use the latest preferences from ref to avoid stale closure
     const expectedMode = currentPrefs.noteEditorMode;
 
+    // Resolve the active physical exam template content
+    const activeTemplateId = currentPrefs.selectedPhysicalExamTemplateId || currentPrefs.defaultPhysicalExamTemplateId;
+    const activeTemplate = currentPrefs.physicalExamTemplates.find(t => t.id === activeTemplateId) 
+      || currentPrefs.physicalExamTemplates[0];
+    const resolvedPrefs = {
+      ...currentPrefs,
+      selectedPhysicalExamTemplate: activeTemplate?.content || currentPrefs.normalPhysicalTemplate,
+    };
+
     try {
       const { data, error } = await supabase.functions.invoke('generate-note', {
         body: { 
           noteType: 'SOAP',
           transcript,
-          preferences: currentPrefs
+          preferences: resolvedPrefs
         }
       });
 
