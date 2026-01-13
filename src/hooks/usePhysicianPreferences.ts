@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 export type NoteEditorMode = 'SOAP_4_FIELD' | 'SOAP_3_FIELD';
 export type PatientGender = 'male' | 'female' | 'other';
+export type LiveDraftMode = 'A' | 'B';
 
 export interface PhysicalExamTemplate {
   id: string;
@@ -31,6 +32,8 @@ export interface PhysicianPreferences {
   defaultPhysicalExamTemplateId: string;
   // Per-encounter template selection (stored in session, not preferences)
   selectedPhysicalExamTemplateId?: string;
+  // Live Draft Mode - persists across sessions
+  liveDraftMode: LiveDraftMode;
 }
 
 const STORAGE_KEY = 'docnoteai_preferences';
@@ -90,6 +93,7 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   normalPhysicalTemplate: DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
   physicalExamTemplates: getDefaultPhysicalExamTemplates(),
   defaultPhysicalExamTemplateId: 'default_general',
+  liveDraftMode: 'A',
 });
 
 const loadPreferences = (): PhysicianPreferences => {
@@ -150,6 +154,7 @@ const loadPreferences = (): PhysicianPreferences => {
           : DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
         physicalExamTemplates,
         defaultPhysicalExamTemplateId,
+        liveDraftMode: ['A', 'B'].includes(parsed.liveDraftMode) ? parsed.liveDraftMode : 'A',
       };
     }
   } catch (e) {

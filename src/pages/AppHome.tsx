@@ -14,7 +14,7 @@ import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, T
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
-import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender } from '@/hooks/usePhysicianPreferences';
+import { usePhysicianPreferences, NoteEditorMode, PhysicianPreferences, PatientGender, LiveDraftMode } from '@/hooks/usePhysicianPreferences';
 import { useLiveScribe } from '@/hooks/useLiveScribe';
 import { useHybridLiveScribe } from '@/hooks/useHybridLiveScribe';
 import { useBrowserLiveTranscript } from '@/hooks/useBrowserLiveTranscript';
@@ -96,7 +96,6 @@ const AppHome = () => {
     setJobName,
     setTranscriptText,
     setMarkdownExpanded,
-    setLiveDraftMode,
     setRunningSummary,
     handleNewGenerated,
     acceptNewGenerated,
@@ -198,7 +197,7 @@ const AppHome = () => {
         variant: 'destructive',
       });
     },
-    liveDraftMode: docSession.liveDraftMode,
+    liveDraftMode: preferences.liveDraftMode,
     preferences,
   });
 
@@ -223,7 +222,7 @@ const AppHome = () => {
       });
     },
     chunkIntervalMs: 10000,
-    liveDraftMode: docSession.liveDraftMode,
+    liveDraftMode: preferences.liveDraftMode,
     preferences,
   });
 
@@ -912,14 +911,14 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
               <div className="space-y-1">
                 <Label className="text-sm font-medium">Live Draft Mode</Label>
                 <p className="text-xs text-muted-foreground">
-                  {docSession.liveDraftMode === 'A' 
+                  {preferences.liveDraftMode === 'A' 
                     ? 'Final note generated after recording stops'
                     : 'Running summary updates during recording'}
                 </p>
               </div>
               <Select
-                value={docSession.liveDraftMode}
-                onValueChange={(value: 'A' | 'B') => setLiveDraftMode(value)}
+                value={preferences.liveDraftMode}
+                onValueChange={(value: 'A' | 'B') => setPreferences({ liveDraftMode: value })}
                 disabled={liveScribe.status === 'recording'}
               >
                 <SelectTrigger className="w-[200px]">
@@ -1026,7 +1025,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
             </div>
 
             {/* Running Summary Panel (Option B only) - show during recording, paused, or if summary exists */}
-            {docSession.liveDraftMode === 'B' && (liveScribe.status === 'recording' || liveScribe.status === 'paused' || docSession.runningSummary) && (
+            {preferences.liveDraftMode === 'B' && (liveScribe.status === 'recording' || liveScribe.status === 'paused' || docSession.runningSummary) && (
               <div className="space-y-2 p-4 rounded-lg border-2 border-primary/30 bg-primary/5">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-medium flex items-center gap-2">
@@ -1245,7 +1244,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </span>
                     )}
                   </div>
-                  {docSession.liveDraftMode === 'B' && (
+                  {preferences.liveDraftMode === 'B' && (
                     <div>
                       <span className="text-foreground">Summary API:</span>{' '}
                       {liveScribe.debugInfo.lastSummaryCallAt ? (

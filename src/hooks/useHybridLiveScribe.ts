@@ -13,7 +13,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useDeepgramStream, DeepgramStreamStatus, DeepgramStreamMetrics } from './useDeepgramStream';
 import { usePublicConfig } from './usePublicConfig';
-import type { LiveDraftMode } from './useDocNoteSession';
+import type { LiveDraftMode } from './usePhysicianPreferences';
 import { safeLog, safeWarn, safeErrorLog } from '@/lib/debug';
 
 export type HybridLiveScribeStatus = 'idle' | 'connecting' | 'recording' | 'paused' | 'finalizing' | 'done' | 'error';

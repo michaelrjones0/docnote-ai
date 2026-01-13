@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { LiveDraftMode } from './useDocNoteSession';
+import type { LiveDraftMode } from './usePhysicianPreferences';
 import { debugLog, debugLogPHI, safeLog, safeWarn, safeErrorLog } from '@/lib/debug';
 
 // Check if error is auth-related (401, expired token, etc.)
