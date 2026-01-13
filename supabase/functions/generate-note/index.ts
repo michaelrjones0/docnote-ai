@@ -220,16 +220,23 @@ ${preferenceInstructions}
    
    Example: If template says "CV: RRR, no murmurs" but transcript mentions "patient has a 2/6 systolic murmur", output "CV: RRR, 2/6 systolic murmur heard."
 
-3. ASSESSMENT:
+3. ASSESSMENT (Problem-Compartmentalized Format):
    - State the clinical problem(s)/diagnosis(es).
    ${prefs.assessmentProblemList ? '- Format as a numbered problem list.' : '- Write as clinical narrative.'}
+   - Format EACH problem header in ALL CAPS followed by a colon: PROBLEM NAME:
+   - Immediately after the header, write the clinical impression for THAT specific problem on the SAME LINE.
    - BAD: "I am assessing the patient for..." or "The assessment is that..."
-   - GOOD: "1. Hypertension, uncontrolled" or "1. Acute low back pain"
+   - GOOD: "HYPERTENSION: Uncontrolled, likely due to medication non-adherence."
+   - GOOD: "ACUTE LOW BACK PAIN: Likely musculoskeletal strain without radiculopathy."
 
-4. PLAN:
+4. PLAN (Problem-Compartmentalized Format):
    - State what will be done for each problem.
-   ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as flowing paragraph.'}
+   - Format EACH problem header in ALL CAPS followed by a colon: PROBLEM NAME:
+   - Immediately after the header, list the plan items for THAT specific problem.
+   ${prefs.planFormat === 'Bullets' ? '- Format plan items as bullet list with "- " prefix after the header line.' : '- Write the plan as a flowing paragraph after the header.'}
    - Use active voice.
+   - GOOD: "HYPERTENSION:\\n- Increase lisinopril to 20mg daily\\n- Recheck BP in 2 weeks"
+   - GOOD: "ACUTE LOW BACK PAIN:\\n- NSAIDs as needed for pain\\n- Physical therapy referral"
    ${prefs.includeFollowUpLine ? '- End with follow-up timing if mentioned, otherwise "Follow up as needed."' : ''}
 
 5. PATIENT INSTRUCTIONS (patientInstructions):
@@ -314,14 +321,15 @@ ${preferenceInstructions}
 3. ASSESSMENT & PLAN (COMBINED - PROBLEM-ORIENTED):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
    - The "assessmentPlan" field must be generated FROM the "ap" array entries.
+   - Format EACH problem header in ALL CAPS followed by a colon.
    - Format assessmentPlan as:
-     Problem 1: <problem name>
+     PROBLEM NAME:
      Assessment: <one sentence clinical assessment>
      Plan:
      - bullet item
      - bullet item
      
-     Problem 2: <problem name>
+     NEXT PROBLEM NAME:
      Assessment: <one sentence clinical assessment>
      Plan:
      - bullet item
@@ -329,7 +337,7 @@ ${preferenceInstructions}
    - If only ONE problem exists, still format the same way with one entry.
    - Do NOT merge multiple problems into one generic plan.
    - BAD: "I am assessing the patient for..."
-    - GOOD: "Problem 1: Hypertension, uncontrolled\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"
+   - GOOD: "HYPERTENSION:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"
 
 4. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.
@@ -414,13 +422,19 @@ ${preferenceInstructions}
    - If vitals are mentioned, add a "Vitals:" line at the beginning.
    - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
 
-4. ASSESSMENT (Problem-Oriented Format):
-   - Create a NUMBERED problem list with clinical impression for each.
-   ${prefs.assessmentProblemList ? '- Format as numbered list.' : '- Write as clinical narrative.'}
+4. ASSESSMENT (Problem-Compartmentalized Format):
+   - Create a problem list with clinical impression for each.
+   - Format EACH problem header in ALL CAPS followed by a colon: PROBLEM NAME:
+   - Immediately after the header, write the clinical impression for THAT specific problem on the SAME LINE.
+   ${prefs.assessmentProblemList ? '- Organize as a list of problems.' : '- Write as clinical narrative.'}
+   - GOOD: "HYPERTENSION: Uncontrolled, likely due to medication non-adherence."
 
-5. PLAN (Problem-Oriented Format):
+5. PLAN (Problem-Compartmentalized Format):
    - For each problem include plan items.
-   ${prefs.planFormat === 'Bullets' ? '- Format as bullet list with "- " prefix.' : '- Write as a flowing paragraph.'}
+   - Format EACH problem header in ALL CAPS followed by a colon: PROBLEM NAME:
+   - Immediately after the header, list the plan items for THAT specific problem.
+   ${prefs.planFormat === 'Bullets' ? '- Format plan items as bullet list with "- " prefix after the header line.' : '- Write the plan as a flowing paragraph after the header.'}
+   - GOOD: "HYPERTENSION:\\n- Increase lisinopril to 20mg daily\\n- Recheck BP in 2 weeks"
    ${prefs.includeFollowUpLine ? '- If follow-up timing not stated, end with "Follow up as needed."' : '- Only include follow-up if explicitly stated in transcript.'}
 
 6. PATIENT INSTRUCTIONS (patientInstructions):
@@ -506,14 +520,16 @@ ${preferenceInstructions}
 4. ASSESSMENT & PLAN (Combined, Problem-Oriented Format):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
    - The "assessmentPlan" field must be generated FROM the "ap" array entries.
+   - Format EACH problem header in ALL CAPS followed by a colon.
    - Format assessmentPlan as:
-     Problem 1: <problem name>
+     PROBLEM NAME:
      Assessment: <one sentence clinical assessment>
      Plan:
      - bullet item
      - bullet item
    
    - If only ONE problem exists, still format the same way.
+   - GOOD: "HYPERTENSION:\\nAssessment: Blood pressure remains elevated.\\nPlan:\\n- Increase lisinopril"
    ${prefs.includeFollowUpLine ? '- End each problem\'s plan with follow-up if stated, or add "Follow up as needed." for last problem.' : '- Only include follow-up if explicitly stated in transcript.'}
 
 5. PATIENT INSTRUCTIONS (patientInstructions):
