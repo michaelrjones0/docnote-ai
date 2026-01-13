@@ -8,27 +8,28 @@ export interface RichSoapTextareaProps
 }
 
 /**
- * Parses text to find complaint headers (ALL CAPS followed by colon)
- * and converts them to styled spans with bold and underline
+ * Parses text to find problem/complaint headers (word(s) followed by colon at start of line)
+ * and converts them to styled spans with bold formatting
  */
-const parseSubjectiveText = (text: string): React.ReactNode[] => {
+const parseHeaderText = (text: string): React.ReactNode[] => {
   if (!text) return [];
   
-  // Pattern: Line starts with ALL CAPS words followed by a colon
-  // e.g., "LOW BACK PAIN:" or "HEADACHES:" at start of line or after newline
+  // Pattern: Line starts with one or more words (Title Case, ALL CAPS, or mixed) followed by a colon
+  // e.g., "Low Back Pain:" or "HEADACHES:" or "Hypertension:"
   const lines = text.split('\n');
   const result: React.ReactNode[] = [];
   
   lines.forEach((line, lineIndex) => {
-    // Check if line starts with ALL CAPS header pattern
-    // Pattern: One or more UPPERCASE words followed by colon
-    const headerMatch = line.match(/^([A-Z][A-Z\s/&-]*[A-Z]):(.*)$/);
+    // Check if line starts with a header pattern
+    // Pattern: Words (letters, spaces, hyphens, slashes, ampersands, numbers) followed by colon
+    // Must start with a capital letter
+    const headerMatch = line.match(/^([A-Z][A-Za-z0-9\s/&-]*):(.*)$/);
     
     if (headerMatch) {
       const [, header, rest] = headerMatch;
       result.push(
         <React.Fragment key={lineIndex}>
-          <span className="font-bold underline">{header}:</span>
+          <span className="font-bold">{header}:</span>
           {rest}
           {lineIndex < lines.length - 1 && '\n'}
         </React.Fragment>
@@ -122,8 +123,8 @@ const RichSoapTextarea = React.forwardRef<HTMLTextAreaElement, RichSoapTextareaP
               className
             )}
           >
-            {textValue ? (
-              parseSubjectiveText(textValue)
+          {textValue ? (
+              parseHeaderText(textValue)
             ) : (
               <span className="text-muted-foreground">{props.placeholder}</span>
             )}

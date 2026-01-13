@@ -18,6 +18,7 @@ export interface PhysicianPreferences {
   patientQuotes: boolean;
   styleText: string;
   assessmentProblemList: boolean;
+  assessmentPlanNumbered: boolean; // true = numbered bullets, false = unnumbered
   includeFollowUpLine: boolean;
   noteEditorMode: NoteEditorMode;
   patientFirstName: string;
@@ -84,6 +85,7 @@ const getDefaultPreferences = (): PhysicianPreferences => ({
   patientQuotes: true,
   styleText: '',
   assessmentProblemList: true,
+  assessmentPlanNumbered: false, // default to unnumbered bullets
   includeFollowUpLine: true,
   noteEditorMode: 'SOAP_4_FIELD',
   patientFirstName: '',
@@ -141,6 +143,7 @@ const loadPreferences = (): PhysicianPreferences => {
           ? parsed.styleText.slice(0, MAX_STYLE_TEXT_LENGTH) 
           : '',
         assessmentProblemList: typeof parsed.assessmentProblemList === 'boolean' ? parsed.assessmentProblemList : true,
+        assessmentPlanNumbered: typeof parsed.assessmentPlanNumbered === 'boolean' ? parsed.assessmentPlanNumbered : false,
         includeFollowUpLine: typeof parsed.includeFollowUpLine === 'boolean' ? parsed.includeFollowUpLine : true,
         noteEditorMode: ['SOAP_4_FIELD', 'SOAP_3_FIELD'].includes(parsed.noteEditorMode)
           ? parsed.noteEditorMode
