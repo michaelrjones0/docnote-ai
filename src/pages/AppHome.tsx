@@ -81,7 +81,7 @@ const AppHome = () => {
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
   const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
   const [showEndEncounterDialog, setShowEndEncounterDialog] = useState(false);
-  const { preferences, setPreferences } = usePhysicianPreferences();
+  const { preferences, setPreferences, addTemplate, updateTemplate, deleteTemplate, setDefaultTemplate } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
   const preferencesRef = useRef<PhysicianPreferences>(preferences);
@@ -766,7 +766,14 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 <div className="flex items-center gap-4">
                   <ResetDemoAckButton />
                   <span className="text-sm text-muted-foreground">{user.email}</span>
-                  <SettingsSheet preferences={preferences} setPreferences={setPreferences} />
+                  <SettingsSheet 
+                    preferences={preferences} 
+                    setPreferences={setPreferences}
+                    addTemplate={addTemplate}
+                    updateTemplate={updateTemplate}
+                    deleteTemplate={deleteTemplate}
+                    setDefaultTemplate={setDefaultTemplate}
+                  />
                   <Button onClick={handleClearSession} variant="outline" size="sm">
                     <Trash2 className="h-4 w-4 mr-2" />
                     Clear Session

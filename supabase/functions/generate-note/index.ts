@@ -51,6 +51,8 @@ interface Preferences {
   patientName: string;
   patientGender: PatientGender;
   normalPhysicalTemplate: string;
+  // Selected template content (passed from frontend after resolving template selection)
+  selectedPhysicalExamTemplate: string;
 }
 
 // Get pronoun set for consistent language
@@ -76,6 +78,13 @@ Extremities: No edema, cyanosis, or clubbing. Full ROM.
 Neuro: Alert and oriented x3. CN II-XII intact. Normal gait.`;
 
 const validatePreferences = (prefs: any): Preferences => {
+  // Resolve the active template: use selectedPhysicalExamTemplate if provided, else normalPhysicalTemplate
+  const selectedTemplate = typeof prefs?.selectedPhysicalExamTemplate === 'string' && prefs.selectedPhysicalExamTemplate.trim()
+    ? prefs.selectedPhysicalExamTemplate.slice(0, 2000)
+    : (typeof prefs?.normalPhysicalTemplate === 'string' 
+        ? prefs.normalPhysicalTemplate.slice(0, 2000) 
+        : DEFAULT_NORMAL_PHYSICAL_TEMPLATE);
+  
   return {
     noteStructure: ['SOAP', 'Problem-Oriented'].includes(prefs?.noteStructure)
       ? prefs.noteStructure
@@ -99,8 +108,9 @@ const validatePreferences = (prefs: any): Preferences => {
     patientName: typeof prefs?.patientName === 'string' ? prefs.patientName.trim() : '',
     patientGender: ['male', 'female', 'other'].includes(prefs?.patientGender) ? prefs.patientGender : '',
     normalPhysicalTemplate: typeof prefs?.normalPhysicalTemplate === 'string' 
-      ? prefs.normalPhysicalTemplate.slice(0, 1000) 
+      ? prefs.normalPhysicalTemplate.slice(0, 2000) 
       : DEFAULT_NORMAL_PHYSICAL_TEMPLATE,
+    selectedPhysicalExamTemplate: selectedTemplate,
   };
 };
 
@@ -184,11 +194,18 @@ ${preferenceInstructions}
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct.
 
-2. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
-   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
-   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
-   - If the transcript DOES include specific objective findings (vitals, physical exam findings, labs/imaging results, measurements), document ONLY what is explicitly stated.
-   - Do NOT invent additional exam findings beyond the template or stated findings.
+2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
+   You MUST use the following Physical Exam Template as the BASE structure:
+   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   
+   MERGING RULES:
+   - Start with the template as your baseline for all body systems.
+   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
+   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning with the stated values.
+   - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
+   
+   Example: If template says "CV: RRR, no murmurs" but transcript mentions "patient has a 2/6 systolic murmur", output "CV: RRR, 2/6 systolic murmur heard."
 
 3. ASSESSMENT:
    - State the clinical problem(s)/diagnosis(es).
@@ -255,11 +272,18 @@ ${preferenceInstructions}
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct.
 
-2. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
-   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
-   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
-   - If the transcript DOES include specific objective findings (vitals, physical exam findings, labs/imaging results, measurements), document ONLY what is explicitly stated.
-   - Do NOT invent additional exam findings beyond the template or stated findings.
+2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
+   You MUST use the following Physical Exam Template as the BASE structure:
+   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   
+   MERGING RULES:
+   - Start with the template as your baseline for all body systems.
+   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
+   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning with the stated values.
+   - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
+   
+   Example: If template says "Lungs: CTA bilaterally" but transcript mentions "crackles in right lower lobe", output "Lungs: Crackles in right lower lobe."
 
 3. ASSESSMENT & PLAN (COMBINED - PROBLEM-ORIENTED):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
@@ -340,11 +364,17 @@ ${preferenceInstructions}
    - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
-3. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
-   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
-   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
-   - If the transcript DOES include specific objective findings, organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.) using ONLY stated findings.
-   - Do NOT invent additional exam findings beyond the template or stated findings.
+3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
+   You MUST use the following Physical Exam Template as the BASE structure:
+   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   
+   MERGING RULES:
+   - Start with the template as your baseline for all body systems.
+   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
+   - Organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.).
+   - If vitals are mentioned, add a "Vitals:" line at the beginning.
+   - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
 
 4. ASSESSMENT (Problem-Oriented Format):
    - Create a NUMBERED problem list with clinical impression for each.
@@ -412,11 +442,17 @@ ${preferenceInstructions}
    - For each problem: ${detailSentences} sentences summarizing story, prior treatments, imaging, etc. ONLY if mentioned in transcript.
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
-3. OBJECTIVE - NORMAL PHYSICAL TEMPLATE RULE:
-   - If the transcript does NOT explicitly mention physical exam findings, vitals, or objective measurements, use the following Normal Physical template:
-   "${prefs.normalPhysicalTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
-   - If the transcript DOES include specific objective findings, organize by system using ONLY stated findings.
-   - Do NOT invent additional exam findings beyond the template or stated findings.
+3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
+   You MUST use the following Physical Exam Template as the BASE structure:
+   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   
+   MERGING RULES:
+   - Start with the template as your baseline for all body systems.
+   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
+   - Organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.).
+   - If vitals are mentioned, add a "Vitals:" line at the beginning.
+   - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
 
 4. ASSESSMENT & PLAN (Combined, Problem-Oriented Format):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
