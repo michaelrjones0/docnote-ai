@@ -190,18 +190,16 @@ ${preferenceInstructions}
 
 1. SUBJECTIVE (Problem-Compartmentalized Format):
    - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
    - Keep each problem's narrative compartmentalized - do not mix information between problems.
    - CONSISTENT FORMAT for EVERY note:
      
-     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
-     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only]
+     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
      
-     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
-     [Patient's story for THIS complaint only]
+     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
    
-   - If only ONE complaint exists, still use the bold+underlined header format.
+   - If only ONE complaint exists, still use the ALL CAPS header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct within each complaint section.
@@ -283,18 +281,16 @@ ${preferenceInstructions}
 
 1. SUBJECTIVE (Problem-Compartmentalized Format):
    - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
    - Keep each problem's narrative compartmentalized - do not mix information between problems.
    - CONSISTENT FORMAT for EVERY note:
      
-     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
-     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only]
+     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
      
-     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
-     [Patient's story for THIS complaint only]
+     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
    
-   - If only ONE complaint exists, still use the bold+underlined header format.
+   - If only ONE complaint exists, still use the ALL CAPS header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
    ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
    - Be concise and direct within each complaint section.
@@ -390,18 +386,16 @@ ${preferenceInstructions}
 
 2. SUBJECTIVE (Problem-Compartmentalized Format):
    - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
    - Keep each problem's narrative compartmentalized - do not mix information between problems.
    - CONSISTENT FORMAT for EVERY note:
      
-     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
-     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only - ${detailSentences} sentences]
+     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment. (${detailSentences} sentences)
      
-     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
-     [Patient's story for THIS complaint only - ${detailSentences} sentences]
+     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. (${detailSentences} sentences)
    
-   - If only ONE complaint exists, still use the bold+underlined header format.
+   - If only ONE complaint exists, still use the ALL CAPS header format.
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful, under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
@@ -482,18 +476,16 @@ ${preferenceInstructions}
 
 2. SUBJECTIVE (Problem-Compartmentalized Format):
    - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint as a BOLD AND UNDERLINED header using markdown: **<u>Complaint Name</u>**
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only.
+   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
+   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
    - Keep each problem's narrative compartmentalized - do not mix information between problems.
    - CONSISTENT FORMAT for EVERY note:
      
-     **<u>Chief Complaint 1 (e.g., Low Back Pain)</u>**
-     [Patient's story, duration, quality, aggravating/alleviating factors, prior treatments for THIS complaint only - ${detailSentences} sentences]
+     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment. (${detailSentences} sentences)
      
-     **<u>Chief Complaint 2 (e.g., Headaches)</u>**
-     [Patient's story for THIS complaint only - ${detailSentences} sentences]
+     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. (${detailSentences} sentences)
    
-   - If only ONE complaint exists, still use the bold+underlined header format.
+   - If only ONE complaint exists, still use the ALL CAPS header format.
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful, under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
