@@ -195,14 +195,17 @@ ${preferenceInstructions}
    - Be concise and direct.
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
-   You MUST use the following Physical Exam Template as the BASE structure:
-   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
+   ---
+   ${prefs.selectedPhysicalExamTemplate}
+   ---
    
-   MERGING RULES:
-   - Start with the template as your baseline for all body systems.
-   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
-   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
-   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning with the stated values.
+   CRITICAL RULES:
+   - If the transcript does NOT mention ANY physical exam findings, OUTPUT THE ENTIRE TEMPLATE ABOVE AS-IS for the Objective section.
+   - NEVER output "Not documented", "No exam performed", or similar phrases. Always output the template content.
+   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning before the template content.
+   - For EACH body system mentioned in the transcript with SPECIFIC findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings exactly as written.
    - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
    
    Example: If template says "CV: RRR, no murmurs" but transcript mentions "patient has a 2/6 systolic murmur", output "CV: RRR, 2/6 systolic murmur heard."
@@ -273,14 +276,17 @@ ${preferenceInstructions}
    - Be concise and direct.
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
-   You MUST use the following Physical Exam Template as the BASE structure:
-   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
+   ---
+   ${prefs.selectedPhysicalExamTemplate}
+   ---
    
-   MERGING RULES:
-   - Start with the template as your baseline for all body systems.
-   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
-   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
-   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning with the stated values.
+   CRITICAL RULES:
+   - If the transcript does NOT mention ANY physical exam findings, OUTPUT THE ENTIRE TEMPLATE ABOVE AS-IS for the Objective section.
+   - NEVER output "Not documented", "No exam performed", or similar phrases. Always output the template content.
+   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning before the template content.
+   - For EACH body system mentioned in the transcript with SPECIFIC findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings exactly as written.
    - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
    
    Example: If template says "Lungs: CTA bilaterally" but transcript mentions "crackles in right lower lobe", output "Lungs: Crackles in right lower lobe."
@@ -365,12 +371,16 @@ ${preferenceInstructions}
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
-   You MUST use the following Physical Exam Template as the BASE structure:
-   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
+   ---
+   ${prefs.selectedPhysicalExamTemplate}
+   ---
    
-   MERGING RULES:
-   - Start with the template as your baseline for all body systems.
-   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   CRITICAL RULES:
+   - If the transcript does NOT mention ANY physical exam findings, OUTPUT THE ENTIRE TEMPLATE ABOVE AS-IS for the Objective section.
+   - NEVER output "Not documented", "No exam performed", or similar phrases. Always output the template content.
+   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning before the template content.
+   - For EACH body system mentioned in the transcript with SPECIFIC findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
    - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
    - Organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.).
    - If vitals are mentioned, add a "Vitals:" line at the beginning.
@@ -412,7 +422,7 @@ ${preferenceInstructions}
    [problem-oriented subjective content - use ### Problem Name headers if multiple problems]
    
    ## Objective
-   [system-based findings OR "Not documented."]
+   [system-based findings - USE TEMPLATE IF NO EXAM IN TRANSCRIPT]
    
    ## Assessment
    1. **Problem Name** - [assessment text]
@@ -443,15 +453,18 @@ ${preferenceInstructions}
    ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
-   You MUST use the following Physical Exam Template as the BASE structure:
-   "${prefs.selectedPhysicalExamTemplate.replace(/"/g, '\\"').replace(/\n/g, '\\n')}"
+   The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
+   ---
+   ${prefs.selectedPhysicalExamTemplate}
+   ---
    
-   MERGING RULES:
-   - Start with the template as your baseline for all body systems.
-   - For EACH body system mentioned in the transcript with specific findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
-   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings.
+   CRITICAL RULES:
+   - If the transcript does NOT mention ANY physical exam findings, OUTPUT THE ENTIRE TEMPLATE ABOVE AS-IS for the Objective section.
+   - NEVER output "Not documented", "No exam performed", or similar phrases. Always output the template content.
+   - If vitals are mentioned in the transcript, add a "Vitals:" line at the beginning before the template content.
+   - For EACH body system mentioned in the transcript with SPECIFIC findings (pertinent positives), REPLACE that system's template text with the actual findings from the transcript.
+   - For body systems NOT mentioned in the transcript, KEEP the template's default (normal) findings exactly as written.
    - Organize by system (Vitals, General, CV, Resp, GI, MSK, Neuro, etc.).
-   - If vitals are mentioned, add a "Vitals:" line at the beginning.
    - Do NOT invent findings beyond what's in the template or explicitly stated in the transcript.
 
 4. ASSESSMENT & PLAN (Combined, Problem-Oriented Format):
@@ -620,7 +633,7 @@ ${transcript}
 
 Remember: 
 - Apply the physician preferences strictly.
-- For Objective: ONLY include findings explicitly stated in the transcript. If no objective data is mentioned, write "Not documented."
+- For Objective: Use the Physical Exam Template as the baseline. Merge any pertinent positives from the transcript. If no exam findings in transcript, output the template AS-IS.
 - Output mode: ${is4Field ? 'SOAP_4_FIELD (4 separate fields: S, O, A, P)' : 'SOAP_3_FIELD (3 fields: S, O, A/P combined)'}
 - Output ONLY valid JSON.`;
 
