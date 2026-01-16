@@ -223,13 +223,16 @@ ${preferenceInstructions}
    Example: If template says "CV: RRR, no murmurs" but transcript mentions "patient has a 2/6 systolic murmur", output "CV: RRR, 2/6 systolic murmur heard."
 
 3. ASSESSMENT (Problem-Compartmentalized Format):
-   - State the clinical problem(s)/diagnosis(es).
+   - State PRECISE MEDICAL DIAGNOSES, not abstract concepts or management topics.
+   - CRITICAL: Use specific clinical diagnoses (e.g., "Essential Hypertension", "Acute Lumbar Strain", "Type 2 Diabetes Mellitus") NOT abstract terms (e.g., "Blood Pressure Management", "Pain Control", "Glucose Management").
    ${prefs.assessmentProblemList ? (prefs.assessmentPlanNumbered ? '- Format as a numbered problem list (1., 2., 3., etc.).' : '- Format as a problem list with bullet points.') : '- Write as clinical narrative.'}
-   - Format EACH problem header in Title Case followed by a colon: Problem Name:
-   - Immediately after the header, write the clinical impression for THAT specific problem on the SAME LINE.
+   - Format EACH diagnosis header in Title Case followed by a colon: Diagnosis Name:
+   - Immediately after the header, write the clinical impression for THAT specific diagnosis on the SAME LINE.
+   - BAD: "Blood Pressure Management: Currently elevated..." (too abstract)
    - BAD: "I am assessing the patient for..." or "The assessment is that..."
-   - GOOD: "Hypertension: Uncontrolled, likely due to medication non-adherence."
-   - GOOD: "Acute Low Back Pain: Likely musculoskeletal strain without radiculopathy."
+   - GOOD: "Essential Hypertension: Uncontrolled, likely due to medication non-adherence."
+   - GOOD: "Acute Lumbar Strain: Musculoskeletal in origin without radiculopathy."
+   - GOOD: "Tension-Type Headache: Chronic, exacerbated by stress."
 
 4. PLAN (Problem-Compartmentalized Format):
    - State what will be done for each problem.
@@ -324,25 +327,28 @@ ${preferenceInstructions}
 3. ASSESSMENT & PLAN (COMBINED - PROBLEM-ORIENTED):
    - For EACH distinct clinical problem discussed, create an entry in the "ap" array.
    - The "assessmentPlan" field must be generated FROM the "ap" array entries.
-   - Format EACH problem header in Title Case followed by a colon.
+   - CRITICAL: Use PRECISE MEDICAL DIAGNOSES as headers, not abstract concepts or management topics.
+   - Use specific clinical diagnoses (e.g., "Essential Hypertension", "Acute Lumbar Strain", "Type 2 Diabetes Mellitus") NOT abstract terms (e.g., "Blood Pressure Management", "Pain Control", "Glucose Management").
+   - Format EACH diagnosis header in Title Case followed by a colon.
    ${prefs.assessmentPlanNumbered ? '- Use numbered lists (1., 2., 3., etc.) for plan items.' : '- Use bullet points (- ) for plan items.'}
    - Format assessmentPlan as:
-     Problem Name:
+     Diagnosis Name:
      Assessment: <one sentence clinical assessment>
      Plan:
      ${prefs.assessmentPlanNumbered ? '1. plan item\\n     2. plan item' : '- bullet item\\n     - bullet item'}
      
-     Next Problem Name:
+     Next Diagnosis Name:
      Assessment: <one sentence clinical assessment>
      Plan:
      ${prefs.assessmentPlanNumbered ? '1. plan item' : '- bullet item'}
    
    - If only ONE problem exists, still format the same way with one entry.
    - Do NOT merge multiple problems into one generic plan.
+   - BAD: "Blood Pressure Management: Currently elevated..." (too abstract)
    - BAD: "I am assessing the patient for..."
    ${prefs.assessmentPlanNumbered 
-     ? '- GOOD: "Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n1. Increase lisinopril to 20mg daily"' 
-     : '- GOOD: "Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"'}
+     ? '- GOOD: "Essential Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n1. Increase lisinopril to 20mg daily"' 
+     : '- GOOD: "Essential Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"'}
 
 4. PATIENT INSTRUCTIONS (patientInstructions):
    - Write a friendly, plain-language letter to the patient summarizing what was discussed.
