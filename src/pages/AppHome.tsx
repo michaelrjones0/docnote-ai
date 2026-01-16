@@ -765,36 +765,34 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
   return (
     <DemoModeGuard>
       <DemoModeBanner />
-      <div className="min-h-screen bg-background p-4">
-        <div className="max-w-4xl mx-auto space-y-6">
-          {/* Header */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-xl">DocNoteAI</CardTitle>
-                <div className="flex items-center gap-4">
-                  <ResetDemoAckButton />
-                  <span className="text-sm text-muted-foreground">{user.email}</span>
-                  <SettingsSheet 
-                    preferences={preferences} 
-                    setPreferences={setPreferences}
-                    addTemplate={addTemplate}
-                    updateTemplate={updateTemplate}
-                    deleteTemplate={deleteTemplate}
-                    setDefaultTemplate={setDefaultTemplate}
-                  />
-                  <Button onClick={handleClearSession} variant="outline" size="sm">
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Clear Session
-                  </Button>
-                  <Button onClick={handleLogout} variant="outline" size="sm">
-                    <LogOut className="h-4 w-4 mr-2" />
-                    Log Out
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
+      <div className="min-h-screen bg-background">
+        {/* Clean Header Bar */}
+        <header className="sticky top-0 z-50 bg-background border-b">
+          <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className="text-xl font-semibold tracking-tight">DocNoteAI</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <ResetDemoAckButton />
+              <SettingsSheet 
+                preferences={preferences} 
+                setPreferences={setPreferences}
+                addTemplate={addTemplate}
+                updateTemplate={updateTemplate}
+                deleteTemplate={deleteTemplate}
+                setDefaultTemplate={setDefaultTemplate}
+              />
+              <Button onClick={handleClearSession} variant="ghost" size="sm">
+                <Trash2 className="h-4 w-4" />
+              </Button>
+              <Button onClick={handleLogout} variant="ghost" size="sm">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
 
         {/* Conflict Banner - now rendered inside SOAP Note section */}
 
@@ -822,68 +820,54 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
         )}
 
         {/* Live Scribe Section */}
-        <Card className="border-primary/50">
-          <CardHeader className="pb-3">
+        <Card className="border rounded-lg shadow-sm">
+          <CardContent className="p-6 space-y-6">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Radio className="h-5 w-5 text-primary" />
-                Live Scribe (Fast Mode)
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                {/* Timer display - always visible to prevent layout shift */}
+              <h2 className="text-lg font-semibold">New Encounter</h2>
+              <div className="flex items-center gap-3">
+                {/* Timer display */}
                 <span className={`text-sm font-mono tabular-nums ${
-                  liveScribe.status === 'recording' ? 'text-red-600 dark:text-red-400' :
-                  liveScribe.status === 'paused' ? 'text-amber-600 dark:text-amber-400' :
-                  liveScribe.status === 'finalizing' ? 'text-amber-600 dark:text-amber-400' :
+                  liveScribe.status === 'recording' ? 'text-destructive' :
+                  liveScribe.status === 'paused' ? 'text-muted-foreground' :
                   'text-muted-foreground'
                 }`}>
                   {formatRecordingTime(liveScribe.recordingElapsedMs)}
                 </span>
                 <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                   liveScribe.status === 'idle' ? 'bg-muted text-muted-foreground' :
-                  liveScribe.status === 'recording' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 animate-pulse' :
-                  liveScribe.status === 'paused' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
-                  liveScribe.status === 'finalizing' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' :
-                  liveScribe.status === 'done' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                  'bg-red-100 text-red-700'
+                  liveScribe.status === 'recording' ? 'bg-destructive/10 text-destructive animate-pulse' :
+                  liveScribe.status === 'paused' ? 'bg-muted text-muted-foreground' :
+                  liveScribe.status === 'finalizing' ? 'bg-muted text-muted-foreground' :
+                  liveScribe.status === 'done' ? 'bg-muted text-foreground' :
+                  'bg-destructive/10 text-destructive'
                 }`}>
-                  {liveScribe.status === 'idle' && 'Idle'}
+                  {liveScribe.status === 'idle' && 'Ready'}
                   {liveScribe.status === 'recording' && '● Recording'}
-                  {liveScribe.status === 'paused' && '⏸ Paused'}
+                  {liveScribe.status === 'paused' && 'Paused'}
                   {liveScribe.status === 'finalizing' && 'Finalizing'}
                   {liveScribe.status === 'done' && 'Done'}
                   {liveScribe.status === 'error' && 'Error'}
                 </span>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
+            
             {/* Patient Info - Required before recording */}
-            <div className="p-4 rounded-lg border-2 border-primary/30 bg-primary/5 space-y-4">
-              <div className="flex items-center gap-2">
-                <Label className="text-sm font-medium">Patient Info</Label>
-                <span className="text-xs text-destructive font-medium">(Required)</span>
-              </div>
-              
+            <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Patient Name */}
                 <div className="space-y-2">
-                  <Label htmlFor="patientName" className="text-sm">Patient Name</Label>
+                  <Label htmlFor="patientName" className="text-sm font-medium">Patient Name <span className="text-destructive">*</span></Label>
                   <Input
                     id="patientName"
                     value={preferences.patientName}
                     onChange={(e) => setPreferences({ patientName: e.target.value })}
                     placeholder="e.g., John Smith"
-                    className={`text-sm ${!preferences.patientName.trim() ? 'border-destructive' : ''}`}
                   />
-                  {!preferences.patientName.trim() && (
-                    <p className="text-xs text-destructive">Required</p>
-                  )}
                 </div>
 
                 {/* Patient Gender - Segmented Control */}
                 <div className="space-y-2">
-                  <Label className="text-sm">Patient Gender</Label>
+                  <Label className="text-sm font-medium">Patient Gender <span className="text-destructive">*</span></Label>
                   <div className="flex rounded-lg border overflow-hidden">
                     {(['male', 'female', 'other'] as PatientGender[]).map((gender) => (
                       <button
@@ -900,9 +884,6 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       </button>
                     ))}
                   </div>
-                  {!preferences.patientGender && (
-                    <p className="text-xs text-destructive">Required</p>
-                  )}
                 </div>
               </div>
             </div>
@@ -1379,32 +1360,27 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
         </Card>
 
         {/* SOAP Note Section */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">
-                SOAP Note
-                {currentNoteType && (
-                  <span className="ml-2 text-xs font-normal text-muted-foreground">
-                    ({currentNoteType === 'SOAP_4_FIELD' ? '4-field' : '3-field'})
-                  </span>
+        <Card className="border rounded-lg shadow-sm">
+          <CardContent className="p-8">
+            {/* Patient Header */}
+            {preferences.patientName && (
+              <div className="mb-8">
+                <h1 className="text-3xl font-bold mb-1">{preferences.patientName}</h1>
+                {hasNote && (
+                  <div className="flex items-center gap-3">
+                    <p className="text-muted-foreground">
+                      {currentNoteType === 'SOAP_4_FIELD' ? 'SOAP Note (4-field)' : 'SOAP Note (3-field)'}
+                    </p>
+                    <div className="flex gap-2">
+                      <CopyButton 
+                        text={currentMarkdown} 
+                        label="Copy" 
+                      />
+                    </div>
+                  </div>
                 )}
-              </CardTitle>
-              {hasNote && (
-                <div className="flex gap-2">
-                  <CopyButton 
-                    text={currentMarkdown} 
-                    label="Copy SOAP" 
-                  />
-                  <CopyButton 
-                    text={exportJson} 
-                    label="Copy JSON" 
-                  />
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
+              </div>
+            )}
             {/* Mode Switch Banner - shown when dropdown mode differs from current note type */}
             {showModeSwitchBanner && (
               <div 
@@ -1479,14 +1455,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
 
             {/* 4-FIELD MODE */}
             {currentSoap && currentNoteType === 'SOAP_4_FIELD' && (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {/* Editable SOAP Cards - 4 Fields */}
-                <div className="space-y-4">
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Subjective
-                      </Label>
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Subjective:</h2>
                       <SectionCopyButton text={currentSoap.subjective || ''} sectionName="Subjective" />
                     </div>
                     <RichSoapTextarea
@@ -1495,14 +1469,13 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       onChange={(e) => editSoapField('subjective', e.target.value)}
                       placeholder="Not documented."
                       enableRichDisplay={true}
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                   
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Objective
-                      </Label>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Objective:</h2>
                       <SectionCopyButton text={currentSoap.objective || ''} sectionName="Objective" />
                     </div>
                     <AutoResizeTextarea
@@ -1510,14 +1483,13 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       value={currentSoap.objective || ''}
                       onChange={(e) => editSoapField('objective', e.target.value)}
                       placeholder="Not documented."
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                   
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-assessment" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Assessment
-                      </Label>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Assessment:</h2>
                       <SectionCopyButton text={currentSoap.assessment || ''} sectionName="Assessment" />
                     </div>
                     <RichSoapTextarea
@@ -1526,14 +1498,13 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       onChange={(e) => editSoapField('assessment', e.target.value)}
                       placeholder="Not documented."
                       enableRichDisplay={true}
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                   
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap-plan" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Plan
-                      </Label>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Plan:</h2>
                       <SectionCopyButton text={currentSoap.plan || ''} sectionName="Plan" />
                     </div>
                     <RichSoapTextarea
@@ -1542,6 +1513,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       onChange={(e) => editSoapField('plan', e.target.value)}
                       placeholder="Not documented."
                       enableRichDisplay={true}
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                 </div>
@@ -1576,14 +1548,12 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
 
             {/* 3-FIELD MODE */}
             {currentSoap3 && currentNoteType === 'SOAP_3_FIELD' && (
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {/* Editable SOAP Cards - 3 Fields */}
-                <div className="space-y-4">
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap3-subjective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Subjective
-                      </Label>
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Subjective:</h2>
                       <SectionCopyButton text={currentSoap3.subjective || ''} sectionName="Subjective" />
                     </div>
                     <RichSoapTextarea
@@ -1592,14 +1562,13 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       onChange={(e) => editSoap3Field('subjective', e.target.value)}
                       placeholder="Not documented."
                       enableRichDisplay={true}
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                   
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap3-objective" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Objective
-                      </Label>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Objective:</h2>
                       <SectionCopyButton text={currentSoap3.objective || ''} sectionName="Objective" />
                     </div>
                     <AutoResizeTextarea
@@ -1607,14 +1576,13 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       value={currentSoap3.objective || ''}
                       onChange={(e) => editSoap3Field('objective', e.target.value)}
                       placeholder="Not documented."
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                   
-                  <div className="border rounded-lg p-4 bg-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label htmlFor="soap3-assessmentPlan" className="font-semibold text-sm text-primary uppercase tracking-wide">
-                        Assessment & Plan
-                      </Label>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-2xl font-bold">Assessment and Plan:</h2>
                       <SectionCopyButton text={currentSoap3.assessmentPlan || ''} sectionName="Assessment & Plan" />
                     </div>
                     <RichSoapTextarea
@@ -1623,6 +1591,7 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                       onChange={(e) => editSoap3Field('assessmentPlan', e.target.value)}
                       placeholder="Not documented."
                       enableRichDisplay={true}
+                      className="border-0 p-0 text-base leading-relaxed"
                     />
                   </div>
                 </div>
