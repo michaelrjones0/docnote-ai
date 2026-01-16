@@ -9,38 +9,47 @@ export interface RichSoapTextareaProps
 
 /**
  * Parses text to find problem/complaint headers (word(s) followed by colon at start of line)
- * and converts them to styled spans with bold formatting
+ * and markdown headers (## ), converting them to styled spans with bold formatting
  */
 const parseHeaderText = (text: string): React.ReactNode[] => {
   if (!text) return [];
   
-  // Pattern: Line starts with one or more words (Title Case, ALL CAPS, or mixed) followed by a colon
-  // e.g., "Low Back Pain:" or "HEADACHES:" or "Hypertension:"
   const lines = text.split('\n');
   const result: React.ReactNode[] = [];
   
   lines.forEach((line, lineIndex) => {
-    // Check if line starts with a header pattern
-    // Pattern: Words (letters, spaces, hyphens, slashes, ampersands, numbers) followed by colon
-    // Must start with a capital letter
-    const headerMatch = line.match(/^([A-Z][A-Za-z0-9\s/&-]*):(.*)$/);
+    // Check for markdown headers (## Header or # Header)
+    const markdownMatch = line.match(/^(#{1,3})\s+(.*)$/);
     
-    if (headerMatch) {
-      const [, header, rest] = headerMatch;
+    if (markdownMatch) {
+      const [, , headerText] = markdownMatch;
       result.push(
         <React.Fragment key={lineIndex}>
-          <span className="font-bold">{header}:</span>
-          {rest}
+          <span className="font-bold">{headerText}</span>
           {lineIndex < lines.length - 1 && '\n'}
         </React.Fragment>
       );
     } else {
-      result.push(
-        <React.Fragment key={lineIndex}>
-          {line}
-          {lineIndex < lines.length - 1 && '\n'}
-        </React.Fragment>
-      );
+      // Check for Title Case: pattern (e.g., "Low Back Pain:" or "HEENT:")
+      const headerMatch = line.match(/^([A-Z][A-Za-z0-9\s/&-]*):(.*)$/);
+      
+      if (headerMatch) {
+        const [, header, rest] = headerMatch;
+        result.push(
+          <React.Fragment key={lineIndex}>
+            <span className="font-bold">{header}:</span>
+            {rest}
+            {lineIndex < lines.length - 1 && '\n'}
+          </React.Fragment>
+        );
+      } else {
+        result.push(
+          <React.Fragment key={lineIndex}>
+            {line}
+            {lineIndex < lines.length - 1 && '\n'}
+          </React.Fragment>
+        );
+      }
     }
   });
   
