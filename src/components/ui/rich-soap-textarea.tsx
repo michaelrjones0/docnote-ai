@@ -117,7 +117,7 @@ const RichSoapTextarea = React.forwardRef<HTMLTextAreaElement, RichSoapTextareaP
           <div
             onClick={handleDisplayClick}
             className={cn(
-              "flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm cursor-text whitespace-pre-wrap",
+              "block min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm cursor-text whitespace-pre-wrap",
               "hover:border-ring/50 transition-colors",
               props.disabled && "cursor-not-allowed opacity-50",
               className
