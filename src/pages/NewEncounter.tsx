@@ -44,7 +44,7 @@ export default function NewEncounter() {
   
   const { isRecording, isPaused, audioBlob, startRecording, stopRecording, pauseRecording, resumeRecording, error: recorderError } = useAudioRecorder();
   const { transcript, isTranscribing, transcribeAudio, addManualTranscript, getFullTranscript, clearTranscript } = useTranscription();
-  const { isGenerating, generatedNote, generateNote, setGeneratedNote } = useNoteGeneration();
+  const { isGenerating, generatedNote, error: generateError, generateNote, setGeneratedNote } = useNoteGeneration();
   
   const { 
     previousVisits, 
@@ -528,6 +528,9 @@ export default function NewEncounter() {
                     Generate
                   </Button>
                 </div>
+                {generateError && (
+                  <p className="text-sm text-destructive">{generateError}</p>
+                )}
               </CardContent>
             </Card>
 

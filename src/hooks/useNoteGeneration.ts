@@ -31,8 +31,21 @@ export function useNoteGeneration() {
     setError(null);
 
     try {
+      console.log('[useNoteGeneration] Invoking generate-note with params:', {
+        noteType: params.noteType,
+        transcriptLength: params.transcript?.length,
+      });
+
       const { data, error: fnError } = await supabase.functions.invoke('generate-note', {
         body: params
+      });
+
+      console.log('[useNoteGeneration] Response received:', {
+        hasData: !!data,
+        hasNote: !!data?.note,
+        hasMarkdown: !!data?.markdown,
+        hasSoap: !!data?.soap,
+        error: fnError,
       });
 
       if (fnError) {
@@ -43,7 +56,17 @@ export function useNoteGeneration() {
         throw new Error(data.error);
       }
 
-      const note = data?.note || '';
+      // Handle different response formats:
+      // - SOAP notes return: { note, markdown, soap }
+      // - Non-SOAP notes return: { note, noteType }
+      const note = data?.markdown || data?.note || '';
+      
+      if (!note) {
+        console.error('[useNoteGeneration] No note content in response:', data);
+        throw new Error('No note content received from server');
+      }
+
+      console.log('[useNoteGeneration] Setting generatedNote, length:', note.length);
       setGeneratedNote(note);
       return note;
 
