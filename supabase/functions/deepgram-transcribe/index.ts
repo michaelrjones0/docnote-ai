@@ -30,6 +30,12 @@ function b64ToUint8Array(b64: string): Uint8Array {
 }
 
 serve(async (req) => {
+  // DEBUG PROOF: remove after we confirm deploy is live
+  return new Response(JSON.stringify({ ok: true, proof: "deepgram-v1-live" }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
   const origin = req.headers.get("origin");
 
   if (req.method === "OPTIONS") return json(200, { ok: true }, origin);
