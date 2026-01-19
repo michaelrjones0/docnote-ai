@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { PreviousVisitsPanel } from '@/components/encounters/PreviousVisitsPanel';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Mic, Square, FileText, Loader2, Play, Pause, Save, Upload, X, FileAudio } from 'lucide-react';
+import { ArrowLeft, Mic, Square, FileText, Loader2, Play, Pause, Save, Upload, X, FileAudio, Radio } from 'lucide-react';
 
 interface Patient {
   id: string;
@@ -312,22 +312,27 @@ export default function NewEncounter() {
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
-        <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/encounters')}>
-            <ArrowLeft className="h-4 w-4" />
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/encounters')}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <h1 className="text-xl font-semibold">New Encounter</h1>
+            {isRecording && (
+              <Badge variant="destructive" className="animate-pulse">
+                <span className="h-2 w-2 rounded-full bg-destructive-foreground mr-2" />
+                Recording
+              </Badge>
+            )}
+            {selectedPatient && (
+              <Badge variant="outline">
+                {selectedPatient.last_name}, {selectedPatient.first_name}
+              </Badge>
+            )}
+          </div>
+          <Button variant="outline" onClick={() => navigate('/app')} className="gap-2">
+            <Radio className="h-4 w-4" /> Live Scribe
           </Button>
-          <h1 className="text-xl font-semibold">New Encounter</h1>
-          {isRecording && (
-            <Badge variant="destructive" className="animate-pulse">
-              <span className="h-2 w-2 rounded-full bg-destructive-foreground mr-2" />
-              Recording
-            </Badge>
-          )}
-          {selectedPatient && (
-            <Badge variant="outline">
-              {selectedPatient.last_name}, {selectedPatient.first_name}
-            </Badge>
-          )}
         </div>
       </header>
 
