@@ -28,7 +28,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { 
   ArrowLeft, Plus, Search, Loader2, FileText, Play, Eye, Clock, 
-  CheckCircle2, MoreHorizontal, XCircle, Trash2 
+  CheckCircle2, MoreHorizontal, XCircle, Trash2, Radio 
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -252,9 +252,14 @@ export default function EncounterList() {
             <h1 className="text-xl font-semibold">Encounters</h1>
             <Badge variant="secondary">{filteredEncounters.length} total</Badge>
           </div>
-          <Button onClick={() => navigate('/encounters/new')} className="gap-2">
-            <Plus className="h-4 w-4" /> New Encounter
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => navigate('/app')} className="gap-2">
+              <Radio className="h-4 w-4" /> Live Scribe
+            </Button>
+            <Button onClick={() => navigate('/encounters/new')} className="gap-2">
+              <Plus className="h-4 w-4" /> New Encounter
+            </Button>
+          </div>
         </div>
       </header>
 
