@@ -58,15 +58,20 @@ serve(async (req) => {
   }
 
   // Decode audio bytes from base64
-  let audioBytes: Uint8Array;
+  let audioBytesRaw: Uint8Array;
   try {
-    audioBytes = b64ToUint8Array(audioBase64);
+    audioBytesRaw = b64ToUint8Array(audioBase64);
   } catch {
     return json(400, { error: "Base64 decode failed" }, origin);
   }
 
-  // Wrap bytes into a Blob (this satisfies Lovable's type checker for fetch body)
-  const audioBlob = new Blob([audioBytes], { type: mimeType });
+  // IMPORTANT: force a "clean" ArrayBuffer-backed Uint8Array copy.
+  // This avoids Lovable's strict typing issues around SharedArrayBuffer/ArrayBufferLike.
+  const audioBytes = new Uint8Array(audioBytesRaw); // copies into a new ArrayBuffer
+  const audioArrayBuffer: ArrayBuffer = audioBytes.buffer;
+
+  // Create Blob from a plain ArrayBuffer (most type-checker friendly)
+  const audioBlob = new Blob([audioArrayBuffer], { type: mimeType });
 
   // Deepgram REST (pre-recorded) endpoint.
   const url =
@@ -97,7 +102,6 @@ serve(async (req) => {
     return json(dgRes.status, { error: "Deepgram error", detail: dgText.slice(0, 2000) }, origin);
   }
 
-  // Parse Deepgram response and extract transcript
   let dgJson: any;
   try {
     dgJson = JSON.parse(dgText);
