@@ -290,7 +290,10 @@ Use those EXACT diagnosis names as headers in BOTH:
    [content with Diagnosis Name: headers]
    
    ## Plan
-   [content with Diagnosis Name: headers]`;
+   [content with Diagnosis Name: headers]
+   
+   ---
+   Electronically signed by ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}`;
 };
 
 // =====================================================
@@ -410,7 +413,10 @@ Use those EXACT diagnosis names as headers in BOTH:
    [content]
    
    ## Assessment & Plan
-   [problem-oriented content matching assessmentPlan field]`;
+   [problem-oriented content matching assessmentPlan field]
+   
+   ---
+   Electronically signed by ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}`;
 };
 
 const buildProblemOrientedFourFieldPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
@@ -508,7 +514,10 @@ ${preferenceInstructions}
    2. **Next Problem** - [assessment text]
    
    ## Plan
-   - [plan items organized by problem if multiple]`;
+   - [plan items organized by problem if multiple]
+   
+   ---
+   Electronically signed by ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}`;
 };
 
 const buildProblemOrientedThreeFieldPrompt = (prefs: Preferences, preferenceInstructions: string): string => {
@@ -605,7 +614,10 @@ ${preferenceInstructions}
    [system-based findings OR "Not documented."]
    
    ## Assessment & Plan
-   [problem-oriented A/P matching assessmentPlan field]`;
+   [problem-oriented A/P matching assessmentPlan field]
+   
+   ---
+   Electronically signed by ${prefs.clinicianDisplayName || 'Dr. [Your Name]'}`;
 };
 
 serve(async (req) => {

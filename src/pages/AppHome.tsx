@@ -640,6 +640,16 @@ const AppHome = () => {
         return `<b>${headerText}</b>`;
       }
       
+      // Check for electronic signature line
+      if (line.match(/^Electronically signed by\s+/i)) {
+        return `<br><i style="color: #666;">${line}</i>`;
+      }
+      
+      // Check for horizontal rule (signature separator)
+      if (line.trim() === '---') {
+        return '<hr style="border: none; border-top: 1px solid #ccc; margin: 12px 0;">';
+      }
+      
       // Check for Title Case: pattern (e.g., "Essential Hypertension:" or "HEENT:")
       const headerMatch = line.match(/^([A-Z][A-Za-z0-9\s/&-]*):(.*)$/);
       if (headerMatch) {
