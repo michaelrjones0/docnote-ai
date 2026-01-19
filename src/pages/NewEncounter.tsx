@@ -22,7 +22,7 @@ interface Patient {
   last_name: string;
 }
 
-export default function Encounters() {
+export default function NewEncounter() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>('');
   const [chiefComplaint, setChiefComplaint] = useState('');
@@ -186,7 +186,7 @@ export default function Encounters() {
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard')}>
+          <Button variant="ghost" size="icon" onClick={() => navigate('/encounters')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-xl font-semibold">New Encounter</h1>

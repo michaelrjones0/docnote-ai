@@ -11,7 +11,9 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Patients from "./pages/Patients";
 import PatientDetail from "./pages/PatientDetail";
-import Encounters from "./pages/Encounters";
+import EncounterList from "./pages/EncounterList";
+import EncounterDetail from "./pages/EncounterDetail";
+import NewEncounter from "./pages/NewEncounter";
 import Notes from "./pages/Notes";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
@@ -37,7 +39,9 @@ const App = () => (
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/patients" element={<Patients />} />
           <Route path="/patients/:patientId" element={<PatientDetail />} />
-          <Route path="/encounters" element={<Encounters />} />
+          <Route path="/encounters" element={<EncounterList />} />
+          <Route path="/encounters/new" element={<NewEncounter />} />
+          <Route path="/encounters/:encounterId" element={<EncounterDetail />} />
           <Route path="/notes" element={<Notes />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />
