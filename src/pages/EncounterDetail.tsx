@@ -8,6 +8,7 @@ import { usePreviousVisits } from '@/hooks/usePreviousVisits';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { RichSoapTextarea } from '@/components/ui/rich-soap-textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -525,16 +526,22 @@ export default function EncounterDetail() {
                     )}
                   </div>
                 ) : isEditing || generatedNote ? (
-                  <Textarea
+                  <RichSoapTextarea
                     value={generatedNote || editedNote}
                     onChange={(e) => generatedNote ? setGeneratedNote(e.target.value) : setEditedNote(e.target.value)}
-                    rows={20}
-                    className="font-mono text-sm"
+                    placeholder="Enter note content..."
+                    enableRichDisplay={true}
+                    className="min-h-[400px]"
                   />
                 ) : (
-                  <div className="prose prose-sm max-w-none dark:prose-invert whitespace-pre-wrap font-mono text-sm bg-muted/30 rounded-md p-4 max-h-[500px] overflow-y-auto">
-                    {noteContent}
-                  </div>
+                  <RichSoapTextarea
+                    value={noteContent}
+                    onChange={() => {}}
+                    placeholder=""
+                    enableRichDisplay={true}
+                    readOnly
+                    className="min-h-[300px] cursor-default"
+                  />
                 )}
               </CardContent>
             </Card>
