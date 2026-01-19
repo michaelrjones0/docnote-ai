@@ -627,15 +627,70 @@ const AppHome = () => {
     });
   }, [clearSession, liveScribe.status, browserTranscript, setPreferences, toast]);
 
+  // Convert plain text with Title Case: headers to HTML with bold formatting
+  const convertTextToRichHtml = (text: string): string => {
+    if (!text) return '';
+    
+    const lines = text.split('\n');
+    const htmlLines = lines.map(line => {
+      // Check for markdown headers (## Header or # Header)
+      const markdownMatch = line.match(/^(#{1,3})\s+(.*)$/);
+      if (markdownMatch) {
+        const [, , headerText] = markdownMatch;
+        return `<b>${headerText}</b>`;
+      }
+      
+      // Check for Title Case: pattern (e.g., "Essential Hypertension:" or "HEENT:")
+      const headerMatch = line.match(/^([A-Z][A-Za-z0-9\s/&-]*):(.*)$/);
+      if (headerMatch) {
+        const [, header, rest] = headerMatch;
+        return `<b>${header}:</b>${rest}`;
+      }
+      
+      return line;
+    });
+    
+    return htmlLines.join('<br>');
+  };
+
+  // Copy with both rich HTML and plain text for Word/Google Docs compatibility
+  const copyRichText = async (text: string): Promise<boolean> => {
+    try {
+      const html = convertTextToRichHtml(text);
+      const htmlBlob = new Blob([html], { type: 'text/html' });
+      const textBlob = new Blob([text], { type: 'text/plain' });
+      
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': htmlBlob,
+          'text/plain': textBlob,
+        }),
+      ]);
+      return true;
+    } catch {
+      // Fallback to plain text if rich copy fails
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  };
+
   const copyToClipboard = async (text: string, fieldName: string) => {
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedField(fieldName);
-      toast({
-        title: 'Copied!',
-        description: `${fieldName} copied to clipboard.`,
-      });
-      setTimeout(() => setCopiedField(null), 2000);
+      const success = await copyRichText(text);
+      if (success) {
+        setCopiedField(fieldName);
+        toast({
+          title: 'Copied!',
+          description: `${fieldName} copied to clipboard.`,
+        });
+        setTimeout(() => setCopiedField(null), 2000);
+      } else {
+        throw new Error('Copy failed');
+      }
     } catch {
       toast({
         title: 'Copy failed',
@@ -681,12 +736,16 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
 
       setDisabled(true);
       try {
-        await navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => {
-          setCopied(false);
-          setDisabled(false);
-        }, 1500);
+        const success = await copyRichText(text);
+        if (success) {
+          setCopied(true);
+          setTimeout(() => {
+            setCopied(false);
+            setDisabled(false);
+          }, 1500);
+        } else {
+          throw new Error('Copy failed');
+        }
       } catch {
         toast({
           title: 'Copy failed',
