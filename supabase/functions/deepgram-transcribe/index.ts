@@ -5,7 +5,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 function corsHeaders(origin: string | null) {
-  // Keep permissive for Lovable previews; tighten later if needed.
+  // Permissive for Lovable previews; tighten later if needed.
   return {
     "Access-Control-Allow-Origin": origin ?? "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -58,7 +58,7 @@ serve(async (req) => {
     return json(400, { error: "mimeType (string) is required, e.g. audio/webm or audio/wav" }, origin);
   }
 
-  // Decode audio bytes
+  // Decode audio bytes from base64
   let audioBytes: Uint8Array;
   try {
     audioBytes = b64ToUint8Array(audioBase64);
@@ -66,9 +66,11 @@ serve(async (req) => {
     return json(400, { error: "Base64 decode failed" }, origin);
   }
 
-  // Deepgram REST (pre-recorded) endpoint
-  // We are NOT setting encoding/sample_rate because those should be omitted for containerized formats like WebM/WAV.
-  // (Deepgram docs recommend omitting encoding/sample_rate for containerized audio.)
+  // Convert Uint8Array -> ArrayBuffer slice (fixes TS typing errors in Edge runtime)
+  const audioBuf = audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength);
+
+  // Deepgram REST (pre-recorded) endpoint.
+  // For container formats like WebM/WAV, omit encoding/sample_rate and just set Content-Type correctly.
   const url =
     "https://api.deepgram.com/v1/listen" +
     "?model=nova-2-medical" +
@@ -85,19 +87,20 @@ serve(async (req) => {
         Authorization: `Token ${DEEPGRAM_API_KEY}`,
         "Content-Type": mimeType,
       },
-      body: audioBytes,
+      body: audioBuf,
     });
   } catch {
     return json(502, { error: "Failed to reach Deepgram" }, origin);
   }
 
   const dgText = await dgRes.text();
+
   if (!dgRes.ok) {
-    // PHI-safe: do not echo audio, but returning DG error text is usually safe (no transcript).
+    // PHI-safe: no audio echoed; DG error text is usually safe (no transcript), but keep it truncated.
     return json(dgRes.status, { error: "Deepgram error", detail: dgText.slice(0, 2000) }, origin);
   }
 
-  // Parse response, extract transcript safely
+  // Parse Deepgram response and extract transcript
   let dgJson: any;
   try {
     dgJson = JSON.parse(dgText);
