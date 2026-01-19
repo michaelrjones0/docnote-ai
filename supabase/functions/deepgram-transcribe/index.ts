@@ -5,7 +5,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 function corsHeaders(origin: string | null) {
-  // Permissive for Lovable previews; tighten later if needed.
   return {
     "Access-Control-Allow-Origin": origin ?? "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -66,11 +65,10 @@ serve(async (req) => {
     return json(400, { error: "Base64 decode failed" }, origin);
   }
 
-  // Convert Uint8Array -> ArrayBuffer slice (fixes TS typing errors in Edge runtime)
-  const audioBuf = audioBytes.buffer.slice(audioBytes.byteOffset, audioBytes.byteOffset + audioBytes.byteLength);
+  // Wrap bytes into a Blob (this satisfies Lovable's type checker for fetch body)
+  const audioBlob = new Blob([audioBytes], { type: mimeType });
 
   // Deepgram REST (pre-recorded) endpoint.
-  // For container formats like WebM/WAV, omit encoding/sample_rate and just set Content-Type correctly.
   const url =
     "https://api.deepgram.com/v1/listen" +
     "?model=nova-2-medical" +
@@ -87,7 +85,7 @@ serve(async (req) => {
         Authorization: `Token ${DEEPGRAM_API_KEY}`,
         "Content-Type": mimeType,
       },
-      body: audioBuf,
+      body: audioBlob,
     });
   } catch {
     return json(502, { error: "Failed to reach Deepgram" }, origin);
@@ -96,7 +94,6 @@ serve(async (req) => {
   const dgText = await dgRes.text();
 
   if (!dgRes.ok) {
-    // PHI-safe: no audio echoed; DG error text is usually safe (no transcript), but keep it truncated.
     return json(dgRes.status, { error: "Deepgram error", detail: dgText.slice(0, 2000) }, origin);
   }
 
