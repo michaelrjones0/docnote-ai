@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -68,6 +68,7 @@ interface SoapResponse {
 const AppHome = () => {
   const { user, session, isLoading, signOut } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const [authCheckResult, setAuthCheckResult] = useState<string | null>(null);
   const [isTestingAuth, setIsTestingAuth] = useState(false);
@@ -89,6 +90,21 @@ const AppHome = () => {
   useEffect(() => {
     preferencesRef.current = preferences;
   }, [preferences]);
+
+  // Handle patient info from URL params (when coming from Encounters)
+  useEffect(() => {
+    const patientName = searchParams.get('patientName');
+    const patientGender = searchParams.get('patientGender') as PatientGender | null;
+    
+    if (patientName || patientGender) {
+      const updates: Partial<PhysicianPreferences> = {};
+      if (patientName) updates.patientName = patientName;
+      if (patientGender) updates.patientGender = patientGender;
+      setPreferences(updates);
+      // Clear the URL params after applying them
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setPreferences, setSearchParams]);
 
   const {
     session: docSession,
