@@ -191,20 +191,24 @@ ${preferenceInstructions}
 ## CRITICAL INSTRUCTIONS:
 
 1. SUBJECTIVE (Problem-Compartmentalized Format):
-   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint header in Title Case (capitalize first letter of each word) followed by a colon: Complaint Name:
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
-   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CRITICAL: The Subjective section MUST be organized by the SAME diagnoses/problems that will appear in the Assessment/Plan sections.
+   - First, identify the clinical diagnoses you will use in the Assessment section (e.g., "Essential Hypertension", "Rosacea", "Acute Lumbar Strain").
+   - Then, organize the Subjective content using those EXACT diagnosis names as bold headers.
+   - Format EACH diagnosis header in Title Case (capitalize first letter of each word) followed by a colon: Diagnosis Name:
+   - Immediately after each header, write the patient's story/history for THAT specific diagnosis on the SAME LINE (no line break after the colon).
+   - Keep each problem's narrative compartmentalized - do not mix information between diagnoses.
    - CONSISTENT FORMAT for EVERY note:
      
-     Low Back Pain: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
+     Essential Hypertension: Patient reports he has been monitoring blood pressure at home. States readings have been elevated. Acknowledges inconsistent medication adherence.
      
-     Headaches: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
+     Rosacea: Patient mentions he has started a course of doxycycline which he usually takes in short courses. Reports it is usually effective.
+     
+     Chronic Lumbar Strain: Patient describes ongoing lower back discomfort, worse after prolonged sitting. Has been doing stretches at home with partial relief.
    
-   - If only ONE complaint exists, still use the Title Case header format.
+   - If only ONE diagnosis exists, still use the Title Case header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct within each complaint section.
+   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant diagnosis.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - Be concise and direct within each diagnosis section.
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -293,20 +297,22 @@ ${preferenceInstructions}
 ## CRITICAL INSTRUCTIONS:
 
 1. SUBJECTIVE (Problem-Compartmentalized Format):
-   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint header in Title Case (capitalize first letter of each word) followed by a colon: Complaint Name:
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
-   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CRITICAL: The Subjective section MUST be organized by the SAME diagnoses/problems that will appear in the Assessment & Plan section.
+   - First, identify the clinical diagnoses you will use in the Assessment (e.g., "Essential Hypertension", "Rosacea", "Acute Lumbar Strain").
+   - Then, organize the Subjective content using those EXACT diagnosis names as bold headers.
+   - Format EACH diagnosis header in Title Case (capitalize first letter of each word) followed by a colon: Diagnosis Name:
+   - Immediately after each header, write the patient's story/history for THAT specific diagnosis on the SAME LINE (no line break after the colon).
+   - Keep each problem's narrative compartmentalized - do not mix information between diagnoses.
    - CONSISTENT FORMAT for EVERY note:
      
-     Low Back Pain: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment.
+     Essential Hypertension: Patient reports he has been monitoring blood pressure at home. States readings have been elevated. Acknowledges inconsistent medication adherence.
      
-     Headaches: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. Taking OTC ibuprofen with partial relief.
+     Rosacea: Patient mentions he has started a course of doxycycline which he usually takes in short courses. Reports it is usually effective.
    
-   - If only ONE complaint exists, still use the Title Case header format.
+   - If only ONE diagnosis exists, still use the Title Case header format.
    - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct within each complaint section.
+   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant diagnosis.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - Be concise and direct within each diagnosis section.
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -404,18 +410,20 @@ ${preferenceInstructions}
    - Do NOT invent or extrapolate clinical information.
 
 2. SUBJECTIVE (Problem-Compartmentalized Format):
-   - Identify EACH distinct complaint/problem the patient discusses in the transcript.
-   - Format EACH complaint header in ALL CAPS followed by a colon: COMPLAINT NAME:
-   - Immediately after each header, write the patient's story/history for THAT specific complaint only on the SAME LINE (no line break after the colon).
-   - Keep each problem's narrative compartmentalized - do not mix information between problems.
+   - CRITICAL: The Subjective section MUST be organized by the SAME diagnoses/problems that will appear in the Assessment and Plan sections.
+   - First, identify the clinical diagnoses you will use in the Assessment section.
+   - Then, organize the Subjective content using those EXACT diagnosis names as headers.
+   - Format EACH diagnosis header in ALL CAPS followed by a colon: DIAGNOSIS NAME:
+   - Immediately after each header, write the patient's story/history for THAT specific diagnosis only on the SAME LINE (no line break after the colon).
+   - Keep each problem's narrative compartmentalized - do not mix information between diagnoses.
    - CONSISTENT FORMAT for EVERY note:
      
-     LOW BACK PAIN: Patient reports pain started 3 weeks ago, radiating to left leg, worse with sitting, improved with walking. No prior treatment. (${detailSentences} sentences)
+     ESSENTIAL HYPERTENSION: Patient reports he has been monitoring blood pressure at home. States readings have been elevated. (${detailSentences} sentences)
      
-     HEADACHES: Patient describes throbbing headaches 2-3 times weekly, photophobia present, no nausea. (${detailSentences} sentences)
+     ROSACEA: Patient mentions he has started a course of doxycycline which he usually takes in short courses. (${detailSentences} sentences)
    
-   - If only ONE complaint exists, still use the ALL CAPS header format.
-   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful, under the relevant complaint.' : '- Paraphrase all patient statements; do not use direct quotes.'}
+   - If only ONE diagnosis exists, still use the ALL CAPS header format.
+   ${prefs.patientQuotes ? '- Include at least one direct patient quote if clinically meaningful, under the relevant diagnosis.' : '- Paraphrase all patient statements; do not use direct quotes.'}
 
 3. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
