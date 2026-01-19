@@ -35,6 +35,7 @@ export default function NewEncounter() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isTranscribingUpload, setIsTranscribingUpload] = useState(false);
   const [uploadTranscript, setUploadTranscript] = useState<string>('');
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { user, isLoading: authLoading, isProvider } = useAuth();
@@ -98,10 +99,7 @@ export default function NewEncounter() {
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
+  const validateAndSetFile = (file: File) => {
     // Validate file type
     const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/m4a', 'audio/x-m4a', 'audio/mp4'];
     if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|webm|ogg|m4a)$/i)) {
@@ -110,7 +108,7 @@ export default function NewEncounter() {
         description: 'Please upload an audio file (MP3, WAV, WebM, OGG, M4A)', 
         variant: 'destructive' 
       });
-      return;
+      return false;
     }
     
     // Validate file size (max 25MB for Deepgram)
@@ -120,11 +118,38 @@ export default function NewEncounter() {
         description: 'Maximum file size is 25MB', 
         variant: 'destructive' 
       });
-      return;
+      return false;
     }
     
     setUploadedFile(file);
     setUploadTranscript('');
+    return true;
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) validateAndSetFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    
+    const file = e.dataTransfer.files?.[0];
+    if (file) validateAndSetFile(file);
   };
 
   const handleClearUpload = () => {
@@ -386,10 +411,19 @@ export default function NewEncounter() {
                 {!uploadedFile ? (
                   <div 
                     onClick={() => fileInputRef.current?.click()}
-                    className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary hover:bg-muted/50 transition-colors"
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                      isDragging 
+                        ? 'border-primary bg-primary/10' 
+                        : 'hover:border-primary hover:bg-muted/50'
+                    }`}
                   >
-                    <FileAudio className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-                    <p className="text-sm font-medium">Click to upload an audio file</p>
+                    <FileAudio className={`h-10 w-10 mx-auto mb-3 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <p className="text-sm font-medium">
+                      {isDragging ? 'Drop audio file here' : 'Click or drag to upload an audio file'}
+                    </p>
                     <p className="text-xs text-muted-foreground mt-1">MP3, WAV, WebM, OGG, M4A (max 25MB)</p>
                   </div>
                 ) : (
