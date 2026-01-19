@@ -11,7 +11,7 @@ import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { RichSoapTextarea } from '@/components/ui/rich-soap-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX, ClipboardList } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX, ClipboardList, Upload, FileAudio, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
@@ -83,6 +83,13 @@ const AppHome = () => {
   const [signatureNeededMessage, setSignatureNeededMessage] = useState(false);
   const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
   const [showEndEncounterDialog, setShowEndEncounterDialog] = useState(false);
+  
+  // Audio upload state
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isTranscribingUpload, setIsTranscribingUpload] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   const { preferences, setPreferences, addTemplate, updateTemplate, deleteTemplate, setDefaultTemplate } = usePhysicianPreferences();
   
   // Keep a ref to preferences for use in callbacks (fixes stale closure)
@@ -343,6 +350,122 @@ const AppHome = () => {
       }
     };
   }, []);
+
+  // Audio upload handlers
+  const validateAndSetFile = (file: File) => {
+    const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/m4a', 'audio/x-m4a', 'audio/mp4'];
+    if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|webm|ogg|m4a)$/i)) {
+      toast({ 
+        title: 'Invalid file type', 
+        description: 'Please upload an audio file (MP3, WAV, WebM, OGG, M4A)', 
+        variant: 'destructive' 
+      });
+      return false;
+    }
+    
+    if (file.size > 25 * 1024 * 1024) {
+      toast({ 
+        title: 'File too large', 
+        description: 'Maximum file size is 25MB', 
+        variant: 'destructive' 
+      });
+      return false;
+    }
+    
+    setUploadedFile(file);
+    return true;
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) validateAndSetFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    
+    const file = e.dataTransfer.files?.[0];
+    if (file) validateAndSetFile(file);
+  };
+
+  const handleClearUpload = () => {
+    setUploadedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleTranscribeUpload = async () => {
+    if (!uploadedFile) return;
+    
+    setIsTranscribingUpload(true);
+    try {
+      const arrayBuffer = await uploadedFile.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+      
+      let mimeType = uploadedFile.type || 'audio/mpeg';
+      if (uploadedFile.name.endsWith('.mp3')) mimeType = 'audio/mpeg';
+      else if (uploadedFile.name.endsWith('.wav')) mimeType = 'audio/wav';
+      else if (uploadedFile.name.endsWith('.webm')) mimeType = 'audio/webm';
+      else if (uploadedFile.name.endsWith('.m4a')) mimeType = 'audio/mp4';
+      
+      const { data, error } = await supabase.functions.invoke('deepgram-transcribe', {
+        body: {
+          audioBase64: base64,
+          mimeType,
+        },
+      });
+      
+      if (error) throw error;
+      
+      if (data?.transcript) {
+        // Set the transcript text in the session
+        setTranscriptText(data.transcript);
+        toast({ 
+          title: 'Transcription complete', 
+          description: `${data.duration ? `${Math.round(data.duration)}s of audio processed` : 'Audio processed successfully'}` 
+        });
+        // Auto-generate note after successful transcription
+        setTimeout(() => {
+          handleGenerateSoap();
+        }, 100);
+      } else {
+        toast({ 
+          title: 'No speech detected', 
+          description: 'The audio file may be empty or contain no speech', 
+          variant: 'destructive' 
+        });
+      }
+    } catch (err) {
+      console.error('Upload transcription error:', err);
+      toast({ 
+        title: 'Transcription failed', 
+        description: 'Please try again or use a different audio file', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsTranscribingUpload(false);
+    }
+  };
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -1099,6 +1222,83 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                 </Button>
               )}
             </div>
+
+            {/* Audio File Upload Section - only show when not recording */}
+            {liveScribe.status !== 'recording' && liveScribe.status !== 'paused' && liveScribe.status !== 'finalizing' && (
+              <div className="space-y-3 pt-4 border-t">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <Upload className="h-4 w-4" />
+                  Or Upload Audio File
+                </Label>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.webm,.ogg,.m4a"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                
+                {!uploadedFile ? (
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+                      isDragging 
+                        ? 'border-primary bg-primary/10' 
+                        : 'hover:border-primary hover:bg-muted/50'
+                    }`}
+                  >
+                    <FileAudio className={`h-8 w-8 mx-auto mb-2 ${isDragging ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <p className="text-sm font-medium">
+                      {isDragging ? 'Drop audio file here' : 'Click or drag to upload'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">MP3, WAV, WebM, OGG, M4A (max 25MB)</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <FileAudio className="h-6 w-6 text-primary" />
+                        <div>
+                          <p className="text-sm font-medium truncate max-w-[180px]">{uploadedFile.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={handleClearUpload}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <Button 
+                      onClick={handleTranscribeUpload} 
+                      disabled={isTranscribingUpload || !preferences.patientName.trim() || !preferences.patientGender}
+                      className="w-full gap-2"
+                    >
+                      {isTranscribingUpload ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Transcribing...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="h-4 w-4" />
+                          Transcribe & Generate Note
+                        </>
+                      )}
+                    </Button>
+                    {(!preferences.patientName.trim() || !preferences.patientGender) && (
+                      <p className="text-xs text-destructive text-center">
+                        Please fill in Patient Name and Gender first
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Running Summary Panel (Option B only) - show during recording, paused, or if summary exists */}
             {preferences.liveDraftMode === 'B' && (liveScribe.status === 'recording' || liveScribe.status === 'paused' || docSession.runningSummary) && (
