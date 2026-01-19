@@ -8,8 +8,28 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Plus, Search, Loader2, FileText, Play, Eye, Clock, CheckCircle2 } from 'lucide-react';
+import { 
+  ArrowLeft, Plus, Search, Loader2, FileText, Play, Eye, Clock, 
+  CheckCircle2, MoreHorizontal, XCircle, Trash2 
+} from 'lucide-react';
 import { format } from 'date-fns';
 
 interface EncounterWithPatient {
@@ -30,12 +50,16 @@ interface EncounterWithPatient {
 }
 
 type StatusFilter = 'all' | 'in_progress' | 'completed' | 'cancelled';
+type DialogAction = 'cancel' | 'delete' | null;
 
 export default function EncounterList() {
   const [encounters, setEncounters] = useState<EncounterWithPatient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [selectedEncounter, setSelectedEncounter] = useState<EncounterWithPatient | null>(null);
+  const [dialogAction, setDialogAction] = useState<DialogAction>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -78,7 +102,6 @@ export default function EncounterList() {
 
       if (error) throw error;
       
-      // Transform the data to match our interface
       const transformedData = (data || []).map(enc => ({
         ...enc,
         patient: Array.isArray(enc.patient) ? enc.patient[0] : enc.patient,
@@ -98,13 +121,77 @@ export default function EncounterList() {
     }
   };
 
+  const handleCancelEncounter = async () => {
+    if (!selectedEncounter) return;
+    
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase
+        .from('encounters')
+        .update({ status: 'cancelled' })
+        .eq('id', selectedEncounter.id);
+
+      if (error) throw error;
+      
+      toast({ title: 'Encounter cancelled' });
+      fetchEncounters();
+    } catch (err) {
+      console.error('Error cancelling encounter:', err);
+      toast({ 
+        title: 'Failed to cancel encounter', 
+        description: 'Please try again.', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsProcessing(false);
+      setDialogAction(null);
+      setSelectedEncounter(null);
+    }
+  };
+
+  const handleDeleteEncounter = async () => {
+    if (!selectedEncounter) return;
+    
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase
+        .from('encounters')
+        .delete()
+        .eq('id', selectedEncounter.id);
+
+      if (error) throw error;
+      
+      toast({ title: 'Encounter deleted' });
+      fetchEncounters();
+    } catch (err) {
+      console.error('Error deleting encounter:', err);
+      toast({ 
+        title: 'Failed to delete encounter', 
+        description: 'Please try again.', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsProcessing(false);
+      setDialogAction(null);
+      setSelectedEncounter(null);
+    }
+  };
+
+  const openDialog = (encounter: EncounterWithPatient, action: DialogAction) => {
+    setSelectedEncounter(encounter);
+    setDialogAction(action);
+  };
+
+  const closeDialog = () => {
+    setDialogAction(null);
+    setSelectedEncounter(null);
+  };
+
   const filteredEncounters = encounters.filter(enc => {
-    // Status filter
     if (statusFilter !== 'all' && enc.status !== statusFilter) {
       return false;
     }
     
-    // Search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       const patientName = `${enc.patient.first_name} ${enc.patient.last_name}`.toLowerCase();
@@ -134,7 +221,7 @@ export default function EncounterList() {
       case 'cancelled':
         return (
           <Badge variant="outline" className="bg-muted text-muted-foreground gap-1">
-            Cancelled
+            <XCircle className="h-3 w-3" /> Cancelled
           </Badge>
         );
       default:
@@ -142,7 +229,7 @@ export default function EncounterList() {
     }
   };
 
-  const handleRowClick = (encounterId: string, status: string) => {
+  const handleRowClick = (encounterId: string) => {
     navigate(`/encounters/${encounterId}`);
   };
 
@@ -243,7 +330,7 @@ export default function EncounterList() {
                       <TableRow 
                         key={enc.id} 
                         className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => handleRowClick(enc.id, enc.status)}
+                        onClick={() => handleRowClick(enc.id)}
                       >
                         <TableCell className="font-medium">
                           {format(new Date(enc.encounter_date), 'MMM d, yyyy')}
@@ -293,6 +380,34 @@ export default function EncounterList() {
                                 <Eye className="h-3 w-3" /> View
                               </Button>
                             )}
+                            
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => navigate(`/encounters/${enc.id}`)}>
+                                  <Eye className="h-4 w-4 mr-2" /> View Details
+                                </DropdownMenuItem>
+                                {enc.status !== 'cancelled' && (
+                                  <DropdownMenuItem 
+                                    onClick={() => openDialog(enc, 'cancel')}
+                                    className="text-amber-600"
+                                  >
+                                    <XCircle className="h-4 w-4 mr-2" /> Cancel Encounter
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem 
+                                  onClick={() => openDialog(enc, 'delete')}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" /> Delete Encounter
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -304,6 +419,64 @@ export default function EncounterList() {
           </CardContent>
         </Card>
       </main>
+
+      {/* Cancel Confirmation Dialog */}
+      <AlertDialog open={dialogAction === 'cancel'} onOpenChange={(open) => !open && closeDialog()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel Encounter?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark the encounter for{' '}
+              <span className="font-medium text-foreground">
+                {selectedEncounter?.patient.last_name}, {selectedEncounter?.patient.first_name}
+              </span>{' '}
+              as cancelled. The encounter and any associated notes will be preserved but marked as inactive.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isProcessing}>Keep Encounter</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleCancelEncounter}
+              disabled={isProcessing}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Cancel Encounter
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={dialogAction === 'delete'} onOpenChange={(open) => !open && closeDialog()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Encounter?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the encounter for{' '}
+              <span className="font-medium text-foreground">
+                {selectedEncounter?.patient.last_name}, {selectedEncounter?.patient.first_name}
+              </span>
+              {selectedEncounter?.notes && selectedEncounter.notes.length > 0 && (
+                <span className="block mt-2 text-destructive">
+                  Warning: This encounter has {selectedEncounter.notes.length} associated note(s) that may also be affected.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isProcessing}>Keep Encounter</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDeleteEncounter}
+              disabled={isProcessing}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Delete Permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
