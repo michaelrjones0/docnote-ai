@@ -31,6 +31,7 @@ import {
   CheckCircle2, MoreHorizontal, XCircle, Trash2, Radio 
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { PatientPickerModal } from '@/components/encounters/PatientPickerModal';
 
 interface EncounterWithPatient {
   id: string;
@@ -60,6 +61,7 @@ export default function EncounterList() {
   const [selectedEncounter, setSelectedEncounter] = useState<EncounterWithPatient | null>(null);
   const [dialogAction, setDialogAction] = useState<DialogAction>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showPatientPicker, setShowPatientPicker] = useState(false);
   
   const { user, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -256,7 +258,7 @@ export default function EncounterList() {
             <Button variant="outline" onClick={() => navigate('/app')} className="gap-2">
               <Radio className="h-4 w-4" /> Live Scribe
             </Button>
-            <Button onClick={() => navigate('/encounters/new')} className="gap-2">
+            <Button onClick={() => setShowPatientPicker(true)} className="gap-2">
               <Plus className="h-4 w-4" /> New Encounter
             </Button>
           </div>
@@ -482,6 +484,21 @@ export default function EncounterList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Patient Picker Modal */}
+      <PatientPickerModal
+        open={showPatientPicker}
+        onOpenChange={setShowPatientPicker}
+        onSelectPatient={(patient) => {
+          // Navigate to /app with patient info as URL params
+          const genderMap: Record<string, string> = { 'Male': 'male', 'Female': 'female', 'Other': 'other' };
+          const params = new URLSearchParams({
+            patientName: `${patient.first_name} ${patient.last_name}`,
+            patientGender: genderMap[patient.gender] || 'other',
+          });
+          navigate(`/app?${params.toString()}`);
+        }}
+      />
     </div>
   );
 }
