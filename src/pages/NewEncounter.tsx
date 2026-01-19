@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { useAudioRecorder } from '@/hooks/useAudioRecorder';
@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { PreviousVisitsPanel } from '@/components/encounters/PreviousVisitsPanel';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, Mic, Square, FileText, Loader2, Play, Pause, Save } from 'lucide-react';
+import { ArrowLeft, Mic, Square, FileText, Loader2, Play, Pause, Save, Upload, X, FileAudio } from 'lucide-react';
 
 interface Patient {
   id: string;
@@ -30,6 +30,12 @@ export default function NewEncounter() {
   const [selectedNoteType, setSelectedNoteType] = useState<NoteType>('SOAP');
   const [isSaving, setIsSaving] = useState(false);
   const [encounterId, setEncounterId] = useState<string | null>(null);
+  
+  // Audio upload state
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isTranscribingUpload, setIsTranscribingUpload] = useState(false);
+  const [uploadTranscript, setUploadTranscript] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { user, isLoading: authLoading, isProvider } = useAuth();
   const navigate = useNavigate();
@@ -92,10 +98,105 @@ export default function NewEncounter() {
     }
   };
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Validate file type
+    const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg', 'audio/m4a', 'audio/x-m4a', 'audio/mp4'];
+    if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|webm|ogg|m4a)$/i)) {
+      toast({ 
+        title: 'Invalid file type', 
+        description: 'Please upload an audio file (MP3, WAV, WebM, OGG, M4A)', 
+        variant: 'destructive' 
+      });
+      return;
+    }
+    
+    // Validate file size (max 25MB for Deepgram)
+    if (file.size > 25 * 1024 * 1024) {
+      toast({ 
+        title: 'File too large', 
+        description: 'Maximum file size is 25MB', 
+        variant: 'destructive' 
+      });
+      return;
+    }
+    
+    setUploadedFile(file);
+    setUploadTranscript('');
+  };
+
+  const handleClearUpload = () => {
+    setUploadedFile(null);
+    setUploadTranscript('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleTranscribeUpload = async () => {
+    if (!uploadedFile) return;
+    
+    setIsTranscribingUpload(true);
+    try {
+      // Read file as base64
+      const arrayBuffer = await uploadedFile.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+      
+      // Determine mime type
+      let mimeType = uploadedFile.type || 'audio/mpeg';
+      if (uploadedFile.name.endsWith('.mp3')) mimeType = 'audio/mpeg';
+      else if (uploadedFile.name.endsWith('.wav')) mimeType = 'audio/wav';
+      else if (uploadedFile.name.endsWith('.webm')) mimeType = 'audio/webm';
+      else if (uploadedFile.name.endsWith('.m4a')) mimeType = 'audio/mp4';
+      
+      // Call deepgram-transcribe edge function
+      const { data, error } = await supabase.functions.invoke('deepgram-transcribe', {
+        body: {
+          audioBase64: base64,
+          mimeType,
+        },
+      });
+      
+      if (error) throw error;
+      
+      if (data?.transcript) {
+        setUploadTranscript(data.transcript);
+        // Also add to the main transcript
+        addManualTranscript(data.transcript);
+        toast({ 
+          title: 'Transcription complete', 
+          description: `${data.duration ? `${Math.round(data.duration)}s of audio processed` : 'Audio processed successfully'}` 
+        });
+      } else {
+        toast({ 
+          title: 'No speech detected', 
+          description: 'The audio file may be empty or contain no speech', 
+          variant: 'destructive' 
+        });
+      }
+    } catch (err) {
+      console.error('Upload transcription error:', err);
+      toast({ 
+        title: 'Transcription failed', 
+        description: 'Please try again or use a different audio file', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsTranscribingUpload(false);
+    }
+  };
+
   const handleGenerateNote = async () => {
     const fullTranscript = getFullTranscript();
-    if (!fullTranscript && !manualText) {
-      toast({ title: 'No content', description: 'Please record or type some content first.', variant: 'destructive' });
+    if (!fullTranscript && !manualText && !uploadTranscript) {
+      toast({ title: 'No content', description: 'Please record, upload, or type some content first.', variant: 'destructive' });
       return;
     }
 
@@ -111,7 +212,7 @@ export default function NewEncounter() {
 
       await generateNote({
         noteType: selectedNoteType,
-        transcript: fullTranscript || manualText,
+        transcript: fullTranscript || uploadTranscript || manualText,
         chiefComplaint,
         previousVisits: previousVisitData,
         chronicConditions: chronicData,
@@ -260,6 +361,82 @@ export default function NewEncounter() {
                 {isTranscribing && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" /> Transcribing...
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Audio File Upload */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  Upload Audio File
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.webm,.ogg,.m4a"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                
+                {!uploadedFile ? (
+                  <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary hover:bg-muted/50 transition-colors"
+                  >
+                    <FileAudio className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
+                    <p className="text-sm font-medium">Click to upload an audio file</p>
+                    <p className="text-xs text-muted-foreground mt-1">MP3, WAV, WebM, OGG, M4A (max 25MB)</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <FileAudio className="h-8 w-8 text-primary" />
+                        <div>
+                          <p className="text-sm font-medium truncate max-w-[200px]">{uploadedFile.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="sm" onClick={handleClearUpload}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <Button 
+                      onClick={handleTranscribeUpload} 
+                      disabled={isTranscribingUpload}
+                      className="w-full gap-2"
+                    >
+                      {isTranscribingUpload ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Transcribing...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="h-4 w-4" />
+                          Transcribe Audio
+                        </>
+                      )}
+                    </Button>
+                    
+                    {uploadTranscript && (
+                      <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+                        <p className="text-xs font-medium text-green-700 dark:text-green-300 mb-1">
+                          Transcript from uploaded file:
+                        </p>
+                        <p className="text-sm text-green-900 dark:text-green-100 line-clamp-4">
+                          {uploadTranscript}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>

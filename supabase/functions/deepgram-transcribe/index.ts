@@ -30,12 +30,6 @@ function b64ToUint8Array(b64: string): Uint8Array {
 }
 
 serve(async (req) => {
-  // DEBUG PROOF: remove after we confirm deploy is live
-  return new Response(JSON.stringify({ ok: true, proof: "deepgram-v1-live" }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-
   const origin = req.headers.get("origin");
 
   if (req.method === "OPTIONS") return json(200, { ok: true }, origin);
@@ -43,6 +37,7 @@ serve(async (req) => {
 
   const DEEPGRAM_API_KEY = Deno.env.get("DEEPGRAM_API_KEY");
   if (!DEEPGRAM_API_KEY) {
+    console.error("[deepgram-transcribe] Missing DEEPGRAM_API_KEY");
     return json(500, { error: "Missing DEEPGRAM_API_KEY on server" }, origin);
   }
 
@@ -54,14 +49,13 @@ serve(async (req) => {
   }
 
   const audioBase64 = payload?.audioBase64;
-  const mimeType = payload?.mimeType;
+  const mimeType = payload?.mimeType || "audio/webm";
 
   if (!audioBase64 || typeof audioBase64 !== "string") {
     return json(400, { error: "audioBase64 (string) is required" }, origin);
   }
-  if (!mimeType || typeof mimeType !== "string") {
-    return json(400, { error: "mimeType (string) is required, e.g. audio/webm or audio/wav" }, origin);
-  }
+
+  console.log(`[deepgram-transcribe] Received audio: mimeType=${mimeType}, base64Len=${audioBase64.length}`);
 
   // Decode audio bytes from base64
   let audioBytesRaw: Uint8Array;
@@ -71,12 +65,13 @@ serve(async (req) => {
     return json(400, { error: "Base64 decode failed" }, origin);
   }
 
+  console.log(`[deepgram-transcribe] Decoded ${audioBytesRaw.length} bytes`);
+
   // IMPORTANT: force a "clean" ArrayBuffer-backed Uint8Array copy.
-  // This avoids Lovable's strict typing issues around SharedArrayBuffer/ArrayBufferLike.
-  const audioBytes = new Uint8Array(audioBytesRaw); // copies into a new ArrayBuffer
+  const audioBytes = new Uint8Array(audioBytesRaw);
   const audioArrayBuffer: ArrayBuffer = audioBytes.buffer;
 
-  // Create Blob from a plain ArrayBuffer (most type-checker friendly)
+  // Create Blob from a plain ArrayBuffer
   const audioBlob = new Blob([audioArrayBuffer], { type: mimeType });
 
   // Deepgram REST (pre-recorded) endpoint.
@@ -90,6 +85,7 @@ serve(async (req) => {
 
   let dgRes: Response;
   try {
+    console.log("[deepgram-transcribe] Calling Deepgram API...");
     dgRes = await fetch(url, {
       method: "POST",
       headers: {
@@ -98,13 +94,15 @@ serve(async (req) => {
       },
       body: audioBlob,
     });
-  } catch {
+  } catch (err) {
+    console.error("[deepgram-transcribe] Fetch error:", err);
     return json(502, { error: "Failed to reach Deepgram" }, origin);
   }
 
   const dgText = await dgRes.text();
 
   if (!dgRes.ok) {
+    console.error("[deepgram-transcribe] Deepgram error:", dgRes.status, dgText.slice(0, 500));
     return json(dgRes.status, { error: "Deepgram error", detail: dgText.slice(0, 2000) }, origin);
   }
 
@@ -116,6 +114,15 @@ serve(async (req) => {
   }
 
   const transcript = dgJson?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+  const confidence = dgJson?.results?.channels?.[0]?.alternatives?.[0]?.confidence ?? 0;
+  const duration = dgJson?.metadata?.duration ?? 0;
 
-  return json(200, { ok: true, transcript }, origin);
+  console.log(`[deepgram-transcribe] Success: ${transcript.length} chars, confidence=${confidence}, duration=${duration}s`);
+
+  return json(200, { 
+    ok: true, 
+    transcript,
+    confidence,
+    duration,
+  }, origin);
 });
