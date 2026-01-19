@@ -8,6 +8,7 @@ import { usePreviousVisits } from '@/hooks/usePreviousVisits';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { RichSoapTextarea } from '@/components/ui/rich-soap-textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
@@ -537,18 +538,21 @@ export default function NewEncounter() {
             {generatedNote && (
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>Generated Note</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    SOAP Note
+                  </CardTitle>
                   <Button onClick={handleSaveNote} disabled={isSaving} size="sm" className="gap-2">
                     {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Save Note
                   </Button>
                 </CardHeader>
                 <CardContent>
-                  <Textarea
+                  <RichSoapTextarea
                     value={generatedNote}
                     onChange={(e) => setGeneratedNote(e.target.value)}
-                    rows={20}
-                    className="font-mono text-sm"
+                    enableRichDisplay={true}
+                    className="min-h-[400px] text-sm"
                   />
                 </CardContent>
               </Card>
