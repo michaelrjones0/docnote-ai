@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.public-config]
 verify_jwt = false
+
+[functions.deepgram-transcribe]
+verify_jwt = false
