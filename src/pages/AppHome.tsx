@@ -11,7 +11,7 @@ import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { RichSoapTextarea } from '@/components/ui/rich-soap-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX, ClipboardList } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
@@ -842,6 +842,15 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
               <span className="text-xl font-semibold tracking-tight">DocNoteAI</span>
             </div>
             <div className="flex items-center gap-3">
+              <Button 
+                onClick={() => navigate('/encounters')} 
+                variant="outline" 
+                size="sm"
+                className="gap-2"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Encounters
+              </Button>
               <ResetDemoAckButton />
               <SettingsSheet 
                 preferences={preferences} 
