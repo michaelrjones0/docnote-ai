@@ -1,29 +1,111 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// Supabase Edge Function: deepgram-transcribe
+// Purpose: accept base64 audio from the client, call Deepgram REST /v1/listen using secret DEEPGRAM_API_KEY,
+// and return the transcript. Keeps Deepgram key off the client.
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+
+function corsHeaders(origin: string | null) {
+  // Keep permissive for Lovable previews; tighten later if needed.
+  return {
+    "Access-Control-Allow-Origin": origin ?? "*",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+  };
+}
+
+function json(status: number, body: unknown, origin: string | null) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      ...corsHeaders(origin),
+      "Content-Type": "application/json",
+    },
+  });
+}
+
+function b64ToUint8Array(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
 
 serve(async (req) => {
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+  const origin = req.headers.get("origin");
+
+  if (req.method === "OPTIONS") return json(200, { ok: true }, origin);
+  if (req.method !== "POST") return json(405, { error: "Use POST" }, origin);
+
+  const DEEPGRAM_API_KEY = Deno.env.get("DEEPGRAM_API_KEY");
+  if (!DEEPGRAM_API_KEY) {
+    return json(500, { error: "Missing DEEPGRAM_API_KEY on server" }, origin);
   }
 
+  let payload: any;
   try {
-    // TODO: Add your Deepgram transcription logic here
-    
-    return new Response(
-      JSON.stringify({ message: "deepgram-transcribe function ready" }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
-  } catch (error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[deepgram-transcribe] Error:', error);
-    return new Response(
-      JSON.stringify({ error: errorMessage }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    payload = await req.json();
+  } catch {
+    return json(400, { error: "Invalid JSON body" }, origin);
   }
+
+  const audioBase64 = payload?.audioBase64;
+  const mimeType = payload?.mimeType;
+
+  if (!audioBase64 || typeof audioBase64 !== "string") {
+    return json(400, { error: "audioBase64 (string) is required" }, origin);
+  }
+  if (!mimeType || typeof mimeType !== "string") {
+    return json(400, { error: "mimeType (string) is required, e.g. audio/webm or audio/wav" }, origin);
+  }
+
+  // Decode audio bytes
+  let audioBytes: Uint8Array;
+  try {
+    audioBytes = b64ToUint8Array(audioBase64);
+  } catch {
+    return json(400, { error: "Base64 decode failed" }, origin);
+  }
+
+  // Deepgram REST (pre-recorded) endpoint
+  // We are NOT setting encoding/sample_rate because those should be omitted for containerized formats like WebM/WAV.
+  // (Deepgram docs recommend omitting encoding/sample_rate for containerized audio.)
+  const url =
+    "https://api.deepgram.com/v1/listen" +
+    "?model=nova-2-medical" +
+    "&language=en-US" +
+    "&punctuate=true" +
+    "&smart_format=true" +
+    "&dictation=true";
+
+  let dgRes: Response;
+  try {
+    dgRes = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Token ${DEEPGRAM_API_KEY}`,
+        "Content-Type": mimeType,
+      },
+      body: audioBytes,
+    });
+  } catch {
+    return json(502, { error: "Failed to reach Deepgram" }, origin);
+  }
+
+  const dgText = await dgRes.text();
+  if (!dgRes.ok) {
+    // PHI-safe: do not echo audio, but returning DG error text is usually safe (no transcript).
+    return json(dgRes.status, { error: "Deepgram error", detail: dgText.slice(0, 2000) }, origin);
+  }
+
+  // Parse response, extract transcript safely
+  let dgJson: any;
+  try {
+    dgJson = JSON.parse(dgText);
+  } catch {
+    return json(500, { error: "Deepgram returned non-JSON", detail: dgText.slice(0, 500) }, origin);
+  }
+
+  const transcript = dgJson?.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+
+  return json(200, { ok: true, transcript }, origin);
 });
