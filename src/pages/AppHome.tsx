@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
@@ -11,7 +12,7 @@ import { AutoResizeTextarea } from '@/components/ui/auto-resize-textarea';
 import { RichSoapTextarea } from '@/components/ui/rich-soap-textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX, ClipboardList, Upload, FileAudio, X } from 'lucide-react';
+import { Loader2, LogOut, ShieldCheck, Play, FileText, Copy, Check, RefreshCw, Trash2, AlertTriangle, Mic, Square, Radio, Pause, Pencil, UserX, ClipboardList, Upload, FileAudio, X, Save } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useDocNoteSession, isNote4Field, isNote3Field } from '@/hooks/useDocNoteSession';
@@ -84,6 +85,11 @@ const AppHome = () => {
   const [autoGenerateAfterSignature, setAutoGenerateAfterSignature] = useState(false);
   const [showEndEncounterDialog, setShowEndEncounterDialog] = useState(false);
   
+  // Patient/Encounter linking state (for saving notes to database)
+  const [patientId, setPatientId] = useState<string | null>(null);
+  const [encounterId, setEncounterId] = useState<string | null>(null);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  
   // Audio upload state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isTranscribingUpload, setIsTranscribingUpload] = useState(false);
@@ -100,14 +106,23 @@ const AppHome = () => {
 
   // Handle patient info from URL params (when coming from Encounters)
   useEffect(() => {
+    const urlPatientId = searchParams.get('patientId');
     const patientName = searchParams.get('patientName');
     const patientGender = searchParams.get('patientGender') as PatientGender | null;
     
-    if (patientName || patientGender) {
+    if (urlPatientId || patientName || patientGender) {
+      // Set patient ID for database linking
+      if (urlPatientId) {
+        setPatientId(urlPatientId);
+        setEncounterId(null); // Reset encounter for new patient
+      }
+      
+      // Update preferences with patient info
       const updates: Partial<PhysicianPreferences> = {};
       if (patientName) updates.patientName = patientName;
       if (patientGender) updates.patientGender = patientGender;
       setPreferences(updates);
+      
       // Clear the URL params after applying them
       setSearchParams({}, { replace: true });
     }
@@ -757,6 +772,10 @@ const AppHome = () => {
       patientGender: '' 
     });
     
+    // Clear patient/encounter linking
+    setPatientId(null);
+    setEncounterId(null);
+    
     // Close dialog
     setShowEndEncounterDialog(false);
     
@@ -765,6 +784,98 @@ const AppHome = () => {
       description: 'Ready for a new patient. Please enter patient info to begin.',
     });
   }, [clearSession, liveScribe.status, browserTranscript, setPreferences, toast]);
+
+  // Handler for saving the note to the database
+  const handleSaveNote = useCallback(async () => {
+    // Validate requirements
+    if (!patientId) {
+      toast({
+        title: 'Cannot save note',
+        description: 'Please select a patient from the Encounters page to save notes.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!user) {
+      toast({
+        title: 'Cannot save note',
+        description: 'You must be logged in to save notes.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const currentSoap = getCurrentSoap();
+    const currentSoap3 = getCurrentSoap3();
+    const currentMarkdown = getCurrentMarkdown();
+    
+    if (!currentSoap && !currentSoap3) {
+      toast({
+        title: 'No note to save',
+        description: 'Please generate a note first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsSavingNote(true);
+    try {
+      // Create encounter if not exists
+      let currentEncounterId = encounterId;
+      if (!currentEncounterId) {
+        const { data: enc, error: encError } = await supabase
+          .from('encounters')
+          .insert({
+            patient_id: patientId,
+            provider_id: user.id,
+            chief_complaint: docSession.runningSummary?.slice(0, 200) || preferences.patientName || null,
+            status: 'completed' as const,
+          })
+          .select('id')
+          .single();
+
+        if (encError) throw encError;
+        currentEncounterId = enc.id;
+        setEncounterId(enc.id);
+      }
+
+      // Prepare note content
+      const noteContent = currentSoap 
+        ? { soap: currentSoap } 
+        : { soap3: currentSoap3 };
+
+      // Save the note
+      const noteData = {
+        encounter_id: currentEncounterId as string,
+        note_type: 'SOAP' as const,
+        raw_content: currentMarkdown || '',
+        content: JSON.parse(JSON.stringify(noteContent)) as Json,
+        created_by: user.id,
+        is_finalized: true,
+      };
+      
+      const { error: noteError } = await supabase
+        .from('notes')
+        .insert([noteData]);
+
+      if (noteError) throw noteError;
+
+      toast({
+        title: 'Note saved successfully',
+        description: 'The note has been saved to the patient\'s encounter.',
+      });
+    } catch (err) {
+      console.error('Save note error:', err);
+      toast({
+        title: 'Failed to save note',
+        description: 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingNote(false);
+    }
+  }, [patientId, encounterId, user, getCurrentSoap, getCurrentSoap3, getCurrentMarkdown, docSession.runningSummary, preferences.patientName, toast]);
 
   // Convert plain text with Title Case: headers to HTML with bold formatting
   const convertTextToRichHtml = (text: string): string => {
@@ -1670,8 +1781,29 @@ const CopyButton = ({ text, label }: { text: string; label: string }) => (
                         text={currentMarkdown} 
                         label="Copy" 
                       />
+                      {patientId && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSaveNote}
+                          disabled={isSavingNote}
+                          className="gap-1"
+                        >
+                          {isSavingNote ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Save className="h-4 w-4" />
+                          )}
+                          {encounterId ? 'Update' : 'Save to Chart'}
+                        </Button>
+                      )}
                     </div>
                   </div>
+                )}
+                {!patientId && hasNote && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Start from the <button onClick={() => navigate('/encounters')} className="underline hover:text-primary">Encounters page</button> to save notes to a patient's chart
+                  </p>
                 )}
               </div>
             )}

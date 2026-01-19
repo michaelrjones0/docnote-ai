@@ -490,9 +490,10 @@ export default function EncounterList() {
         open={showPatientPicker}
         onOpenChange={setShowPatientPicker}
         onSelectPatient={(patient) => {
-          // Navigate to /app with patient info as URL params
+          // Navigate to /app with patient info as URL params (including patientId for saving)
           const genderMap: Record<string, string> = { 'Male': 'male', 'Female': 'female', 'Other': 'other' };
           const params = new URLSearchParams({
+            patientId: patient.id,
             patientName: `${patient.first_name} ${patient.last_name}`,
             patientGender: genderMap[patient.gender] || 'other',
           });
