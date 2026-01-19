@@ -188,27 +188,38 @@ const buildFourFieldSystemPrompt = (prefs: Preferences, preferenceInstructions: 
 ## PHYSICIAN PREFERENCES (apply these strictly):
 ${preferenceInstructions}
 
-## CRITICAL INSTRUCTIONS:
+## MANDATORY FORMATTING REQUIREMENTS:
 
-1. SUBJECTIVE (Problem-Compartmentalized Format):
-   - CRITICAL: The Subjective section MUST be organized by the SAME diagnoses/problems that will appear in the Assessment/Plan sections.
-   - First, identify the clinical diagnoses you will use in the Assessment section (e.g., "Essential Hypertension", "Rosacea", "Acute Lumbar Strain").
-   - Then, organize the Subjective content using those EXACT diagnosis names as bold headers.
-   - Format EACH diagnosis header in Title Case (capitalize first letter of each word) followed by a colon: Diagnosis Name:
-   - Immediately after each header, write the patient's story/history for THAT specific diagnosis on the SAME LINE (no line break after the colon).
-   - Keep each problem's narrative compartmentalized - do not mix information between diagnoses.
-   - CONSISTENT FORMAT for EVERY note:
-     
-     Essential Hypertension: Patient reports he has been monitoring blood pressure at home. States readings have been elevated. Acknowledges inconsistent medication adherence.
-     
-     Rosacea: Patient mentions he has started a course of doxycycline which he usually takes in short courses. Reports it is usually effective.
-     
-     Chronic Lumbar Strain: Patient describes ongoing lower back discomfort, worse after prolonged sitting. Has been doing stretches at home with partial relief.
-   
-   - If only ONE diagnosis exists, still use the Title Case header format.
-   - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant diagnosis.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct within each diagnosis section.
+### RULE #1 - SUBJECTIVE MUST HAVE DIAGNOSIS HEADERS (NON-NEGOTIABLE):
+The Subjective section MUST be organized with diagnosis headers that MATCH the Assessment diagnoses.
+
+**WRONG FORMAT (NEVER DO THIS):**
+Steven reports he has lost weight since his ablation. He acknowledges stress recently which may have affected his blood pressure. He mentions he has started doxycycline for his rosacea.
+
+**CORRECT FORMAT (ALWAYS DO THIS):**
+Essential Hypertension: Steven acknowledges he has been under stress recently which may have affected his blood pressure. He states he prefers to avoid medication if possible.
+
+Rosacea: Steven mentions he has started a course of doxycycline which he usually takes in short courses and finds effective.
+
+### RULE #2 - DIAGNOSIS HEADERS MUST MATCH:
+Before writing anything, identify all clinical diagnoses for the encounter.
+Use those EXACT diagnosis names as headers in BOTH:
+- The Subjective section (organizing patient history by problem)
+- The Assessment section (clinical impressions)
+- The Plan section (treatment plans)
+
+---
+
+## DETAILED SECTION INSTRUCTIONS:
+
+1. SUBJECTIVE (Problem-Compartmentalized):
+   - Start by identifying ALL diagnoses that will appear in Assessment.
+   - For EACH diagnosis, write a section header in Title Case followed by a colon: Diagnosis Name:
+   - Write the patient's story for that diagnosis on the SAME LINE after the colon.
+   - Each diagnosis gets its own paragraph. Separate with a blank line between diagnoses.
+   - NEVER write a single paragraph mixing all problems together.
+   - If only ONE diagnosis exists, still use a header for it.
+   ${prefs.patientQuotes ? '- Include meaningful direct patient quotes under the relevant diagnosis.' : '- Paraphrase all patient statements.'}
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -226,27 +237,24 @@ ${preferenceInstructions}
    
    Example: If template says "CV: RRR, no murmurs" but transcript mentions "patient has a 2/6 systolic murmur", output "CV: RRR, 2/6 systolic murmur heard."
 
-3. ASSESSMENT (Problem-Compartmentalized Format):
+3. ASSESSMENT (Problem-Compartmentalized):
    - State PRECISE MEDICAL DIAGNOSES, not abstract concepts or management topics.
-   - CRITICAL: Use specific clinical diagnoses (e.g., "Essential Hypertension", "Acute Lumbar Strain", "Type 2 Diabetes Mellitus") NOT abstract terms (e.g., "Blood Pressure Management", "Pain Control", "Glucose Management").
+   - Use specific clinical diagnoses (e.g., "Essential Hypertension", "Acute Lumbar Strain", "Type 2 Diabetes Mellitus") NOT abstract terms (e.g., "Blood Pressure Management", "Pain Control").
    ${prefs.assessmentProblemList ? (prefs.assessmentPlanNumbered ? '- Format as a numbered problem list (1., 2., 3., etc.).' : '- Format as a problem list with bullet points.') : '- Write as clinical narrative.'}
    - Format EACH diagnosis header in Title Case followed by a colon: Diagnosis Name:
    - Immediately after the header, write the clinical impression for THAT specific diagnosis on the SAME LINE.
-   - BAD: "Blood Pressure Management: Currently elevated..." (too abstract)
-   - BAD: "I am assessing the patient for..." or "The assessment is that..."
    - GOOD: "Essential Hypertension: Uncontrolled, likely due to medication non-adherence."
-   - GOOD: "Acute Lumbar Strain: Musculoskeletal in origin without radiculopathy."
-   - GOOD: "Tension-Type Headache: Chronic, exacerbated by stress."
+   - BAD: "Blood Pressure Management: Currently elevated..." (too abstract)
 
-4. PLAN (Problem-Compartmentalized Format):
+4. PLAN (Problem-Compartmentalized):
    - State what will be done for each problem.
    - Format EACH problem header in Title Case followed by a colon: Problem Name:
    - Immediately after the header, list the plan items for THAT specific problem.
    ${prefs.planFormat === 'Bullets' ? (prefs.assessmentPlanNumbered ? '- Format plan items as numbered list (1., 2., 3., etc.) after the header line.' : '- Format plan items as bullet list with "- " prefix after the header line.') : '- Write the plan as a flowing paragraph after the header.'}
    - Use active voice.
    ${prefs.assessmentPlanNumbered 
-     ? '- GOOD: "Hypertension:\\n1. Increase lisinopril to 20mg daily\\n2. Recheck BP in 2 weeks"\\n- GOOD: "Acute Low Back Pain:\\n1. NSAIDs as needed for pain\\n2. Physical therapy referral"' 
-     : '- GOOD: "Hypertension:\\n- Increase lisinopril to 20mg daily\\n- Recheck BP in 2 weeks"\\n- GOOD: "Acute Low Back Pain:\\n- NSAIDs as needed for pain\\n- Physical therapy referral"'}
+     ? '- GOOD: "Hypertension:\\n1. Increase lisinopril to 20mg daily\\n2. Recheck BP in 2 weeks"' 
+     : '- GOOD: "Hypertension:\\n- Increase lisinopril to 20mg daily\\n- Recheck BP in 2 weeks"'}
    ${prefs.includeFollowUpLine ? '- End with follow-up timing if mentioned, otherwise "Follow up as needed."' : ''}
 
 5. PATIENT INSTRUCTIONS (patientInstructions):
@@ -262,10 +270,10 @@ ${preferenceInstructions}
 6. You must output ONLY valid JSON matching this exact structure:
 {
   "soap": {
-    "subjective": "string",
+    "subjective": "string - MUST contain Diagnosis Name: headers matching Assessment",
     "objective": "string - exam findings from transcript OR Normal Physical template if none mentioned",
-    "assessment": "string",
-    "plan": "string"
+    "assessment": "string - MUST contain Diagnosis Name: headers",
+    "plan": "string - MUST contain Diagnosis Name: headers"
   },
   "patientInstructions": "string - friendly letter to patient",
   "markdown": "formatted markdown note with ## headers for each section"
@@ -273,16 +281,16 @@ ${preferenceInstructions}
 
 7. The markdown field should be a nicely formatted clinical note with:
    ## Subjective
-   [content]
+   [content with Diagnosis Name: headers]
    
    ## Objective
    [content]
    
    ## Assessment
-   [content]
+   [content with Diagnosis Name: headers]
    
    ## Plan
-   [content]`;
+   [content with Diagnosis Name: headers]`;
 };
 
 // =====================================================
@@ -294,25 +302,37 @@ const buildThreeFieldSystemPrompt = (prefs: Preferences, preferenceInstructions:
 ## PHYSICIAN PREFERENCES (apply these strictly):
 ${preferenceInstructions}
 
-## CRITICAL INSTRUCTIONS:
+## MANDATORY FORMATTING REQUIREMENTS:
 
-1. SUBJECTIVE (Problem-Compartmentalized Format):
-   - CRITICAL: The Subjective section MUST be organized by the SAME diagnoses/problems that will appear in the Assessment & Plan section.
-   - First, identify the clinical diagnoses you will use in the Assessment (e.g., "Essential Hypertension", "Rosacea", "Acute Lumbar Strain").
-   - Then, organize the Subjective content using those EXACT diagnosis names as bold headers.
-   - Format EACH diagnosis header in Title Case (capitalize first letter of each word) followed by a colon: Diagnosis Name:
-   - Immediately after each header, write the patient's story/history for THAT specific diagnosis on the SAME LINE (no line break after the colon).
-   - Keep each problem's narrative compartmentalized - do not mix information between diagnoses.
-   - CONSISTENT FORMAT for EVERY note:
-     
-     Essential Hypertension: Patient reports he has been monitoring blood pressure at home. States readings have been elevated. Acknowledges inconsistent medication adherence.
-     
-     Rosacea: Patient mentions he has started a course of doxycycline which he usually takes in short courses. Reports it is usually effective.
-   
-   - If only ONE diagnosis exists, still use the Title Case header format.
-   - Avoid filler phrases like "presents today" or "comes in today" unless clinically relevant.
-   ${prefs.patientQuotes ? '- If the patient gave a direct quote that is clinically meaningful, include it in quotes under the relevant diagnosis.' : '- Paraphrase all patient statements; do not use direct quotes.'}
-   - Be concise and direct within each diagnosis section.
+### RULE #1 - SUBJECTIVE MUST HAVE DIAGNOSIS HEADERS (NON-NEGOTIABLE):
+The Subjective section MUST be organized with diagnosis headers that MATCH the Assessment & Plan diagnoses.
+
+**WRONG FORMAT (NEVER DO THIS):**
+Steven reports he has lost weight since his ablation. He acknowledges stress recently which may have affected his blood pressure. He mentions he has started doxycycline for his rosacea.
+
+**CORRECT FORMAT (ALWAYS DO THIS):**
+Essential Hypertension: Steven acknowledges he has been under stress recently which may have affected his blood pressure. He states he prefers to avoid medication if possible.
+
+Rosacea: Steven mentions he has started a course of doxycycline which he usually takes in short courses and finds effective.
+
+### RULE #2 - DIAGNOSIS HEADERS MUST MATCH:
+Before writing anything, identify all clinical diagnoses for the encounter.
+Use those EXACT diagnosis names as headers in BOTH:
+- The Subjective section (organizing patient history by problem)
+- The Assessment & Plan section (clinical impressions and plans)
+
+---
+
+## DETAILED SECTION INSTRUCTIONS:
+
+1. SUBJECTIVE (Problem-Compartmentalized):
+   - Start by identifying ALL diagnoses that will appear in Assessment & Plan.
+   - For EACH diagnosis, write a section header in Title Case followed by a colon: Diagnosis Name:
+   - Write the patient's story for that diagnosis on the SAME LINE after the colon.
+   - Each diagnosis gets its own paragraph. Separate with a blank line between diagnoses.
+   - NEVER write a single paragraph mixing all problems together.
+   - If only ONE diagnosis exists, still use a header for it.
+   ${prefs.patientQuotes ? '- Include meaningful direct patient quotes under the relevant diagnosis.' : '- Paraphrase all patient statements.'}
 
 2. OBJECTIVE - PHYSICAL EXAM TEMPLATE WITH INTELLIGENT MERGING:
    The following Physical Exam Template is your DEFAULT OUTPUT for the Objective section:
@@ -350,8 +370,6 @@ ${preferenceInstructions}
    
    - If only ONE problem exists, still format the same way with one entry.
    - Do NOT merge multiple problems into one generic plan.
-   - BAD: "Blood Pressure Management: Currently elevated..." (too abstract)
-   - BAD: "I am assessing the patient for..."
    ${prefs.assessmentPlanNumbered 
      ? '- GOOD: "Essential Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n1. Increase lisinopril to 20mg daily"' 
      : '- GOOD: "Essential Hypertension:\\nAssessment: Blood pressure remains elevated despite current medication.\\nPlan:\\n- Increase lisinopril to 20mg daily"'}
@@ -369,7 +387,7 @@ ${preferenceInstructions}
 5. You must output ONLY valid JSON matching this exact structure:
 {
   "soap3": {
-    "subjective": "string",
+    "subjective": "string - MUST contain Diagnosis Name: headers matching Assessment & Plan",
     "objective": "string - exam findings from transcript OR Normal Physical template if none mentioned",
     "assessmentPlan": "string - formatted problem-oriented A/P"
   },
@@ -386,7 +404,7 @@ ${preferenceInstructions}
 
 6. The markdown field should be:
    ## Subjective
-   [content]
+   [content with Diagnosis Name: headers]
    
    ## Objective
    [content]
